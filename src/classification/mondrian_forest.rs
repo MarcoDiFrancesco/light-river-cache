@@ -31,7 +31,7 @@ impl<F: FType> MondrianForestClassifier<F> {
         }
     }
 
-    pub fn predict_proba(&self, x: &Array1<F>) -> Array1<F> {
+    fn predict_proba(&self, x: &Array1<F>) -> Array1<F> {
         let mut tot_probs = Array1::<F>::zeros(self.n_labels);
         for tree in &self.trees {
             let probs = tree.predict_proba(x);
@@ -59,5 +59,15 @@ impl<F: FType> MondrianForestClassifier<F> {
         } else {
             F::zero()
         }
+    }
+
+    pub fn cache_sort(&mut self) {
+        for tree in &mut self.trees {
+            tree.cache_sort();
+        }
+    }
+
+    pub fn get_forest_size(&self) -> Vec<usize> {
+        self.trees.iter().map(|t| t.get_tree_size()).collect()
     }
 }

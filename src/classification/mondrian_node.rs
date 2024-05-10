@@ -24,11 +24,28 @@ pub struct Node<F> {
     pub right: Option<usize>,
     pub stats: Stats<F>,
 }
+impl<F: FType + fmt::Display> fmt::Display for Node<F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Node<left={:?}, right={:?}, parent={:?}, time={:.3}, min={:?}, max={:?}, counts={:?}>",
+            self.left,
+            self.right,
+            self.parent,
+            self.time,
+            self.min_list.to_vec(),
+            self.max_list.to_vec(),
+            self.stats.counts.to_vec(),
+        )?;
+        Ok(())
+    }
+}
+
 impl<F: FType> Node<F> {
-    pub fn update_leaf(&mut self, x: &Array1<F>, y: usize) {
+    pub fn add_to_leaf(&mut self, x: &Array1<F>, y: usize) {
         self.stats.add(x, y);
     }
-    pub fn update_internal(&self, left_s: &Stats<F>, right_s: &Stats<F>) -> Stats<F> {
+    pub fn get_stats_from_children(&self, left_s: &Stats<F>, right_s: &Stats<F>) -> Stats<F> {
         left_s.merge(right_s)
     }
     /// Check if all the labels are the same in the node.
@@ -36,7 +53,7 @@ impl<F: FType> Node<F> {
     /// e.g. y=2, stats.counts=[0, 0, 10] -> True
     /// e.g. y=1, stats.counts=[0, 0, 10] -> False
     pub fn is_dirac(&self, y: usize) -> bool {
-        return self.stats.counts.sum() == self.stats.counts[y];
+        self.stats.counts.sum() == self.stats.counts[y]
     }
 }
 
@@ -45,8 +62,8 @@ impl<F: FType> Node<F> {
 /// In nel215 code it is "Classifier"
 #[derive(Clone)]
 pub struct Stats<F> {
-    pub sums: Array2<F>,
-    pub sq_sums: Array2<F>,
+    sums: Array2<F>,
+    sq_sums: Array2<F>,
     pub counts: Array1<usize>,
     n_labels: usize,
 }
@@ -83,7 +100,7 @@ impl<F: FType> Stats<F> {
         let probs = self.predict_proba(x);
         probs * w
     }
-    pub fn add(&mut self, x: &Array1<F>, y: usize) {
+    fn add(&mut self, x: &Array1<F>, y: usize) {
         // Same as: self.sums[y] += x;
         self.sums.row_mut(y).zip_mut_with(&x, |a, &b| *a += b);
 
@@ -92,11 +109,9 @@ impl<F: FType> Stats<F> {
         self.sq_sums
             .row_mut(y)
             .zip_mut_with(&x, |a, &b| *a += b * b);
-
         self.counts[y] += 1;
     }
     fn merge(&self, s: &Stats<F>) -> Stats<F> {
-        // NOTE: nel215 returns a new Stats object, we are only changing the node values here
         Stats {
             sums: self.sums.clone() + &s.sums,
             sq_sums: self.sq_sums.clone() + &s.sq_sums,
@@ -104,31 +119,6 @@ impl<F: FType> Stats<F> {
             n_labels: self.n_labels,
         }
     }
-    /// Return probabilities of sample 'x' belonging to each class.
-    ///
-    /// # Example
-    /// ```
-    /// use light_river::classification::alias::FType;
-    /// use light_river::classification::mondrian_node::Stats;
-    /// use ndarray::{Array1, Array2};
-    ///
-    /// let mut stats = Stats::new(3, 2); // 3 classes and 2 features
-    /// stats.sums = Array2::from_shape_vec((3,2), vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0])
-    ///     .expect("Failed to create Array2");
-    /// stats.sq_sums = Array2::from_shape_vec((3,2), vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0])
-    ///     .expect("Failed to create Array2");;
-    /// stats.counts = Array1::from_vec(vec![4, 5]);
-    /// stats.add(&Array1::from_vec(vec![1.0, 2.0]), 0);
-    /// stats.add(&Array1::from_vec(vec![2.0, 3.0]), 1);
-    /// stats.add(&Array1::from_vec(vec![2.0, 4.0]), 1);
-    ///
-    /// let x = Array1::from_vec(vec![1.5, 3.0]);
-    /// let probs = stats.predict_proba(&x);
-    /// // Check all values inside [0, 1] range
-    /// assert!(probs.clone().iter().all(|&x| x >= 0.0 && x <= 1.0), "Probabilities should be in [0, 1] range");
-    /// // Check sum is 1
-    /// assert!((probs.clone().sum() - 1.0f32).abs() < 1e-4, "Sum of probabilities should be 1");
-    /// ```
     pub fn predict_proba(&self, x: &Array1<F>) -> Array1<F> {
         let mut probs = Array1::zeros(self.n_labels);
         let mut sum_prob = F::zero();
