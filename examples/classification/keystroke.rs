@@ -52,7 +52,7 @@ fn main() {
     // let labels = labels[0..3].to_vec();
     println!("labels: {labels:?}");
     let mut mf: MondrianForestClassifier<f32> =
-        MondrianForestClassifier::new(window_size, n_trees, &features, &labels);
+        MondrianForestClassifier::new(n_trees, features.len(), labels.len());
 
     let transactions = Keystroke::load_data().unwrap();
     for transaction in transactions {
@@ -75,10 +75,6 @@ fn main() {
         println!("=M=1 partial_fit");
         mf.partial_fit(&x_ord, y);
 
-        println!("=M=2 predict_proba");
-        let score = mf.predict_proba(&x_ord);
-
-        println!("=M=3 score: {:?}", score);
         println!("");
 
         counter += 1;
