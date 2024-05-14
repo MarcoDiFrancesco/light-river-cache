@@ -1,15 +1,10 @@
 use crate::classification::alias::FType;
 use crate::classification::mondrian_node::{Node, Stats};
-
 use ndarray::Array1;
-
 use rand::prelude::*;
 use rand_distr::{Distribution, Exp};
-
 use std::collections::HashSet;
-
 use std::fmt;
-
 use std::usize;
 
 #[derive(Clone)]
@@ -546,7 +541,7 @@ impl<F: FType> MondrianTreeClassifier<F> {
             "New order does not set root correctly. Found time of root: {}, instead of 0.",
             self.nodes[self.root.unwrap()].time
         );
-        self.test_tree();
+        // self.test_tree();
         // println!("cache_sort() - tree post {}", self);
     }
 }

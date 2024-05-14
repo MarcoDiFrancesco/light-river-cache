@@ -53,7 +53,16 @@ fn train_forest(
     let mut score_total = 0.0;
     let transactions = Synthetic::load_data();
 
-    let now = Instant::now();
+    const CACHE_SORT: bool = true;
+    const CACHE_FREQ: usize = 25_000;
+    if CACHE_SORT {
+        println!("Cache sort. Sorting every {} iterations.", CACHE_FREQ);
+    } else {
+        println!("No cache sort");
+    }
+
+    let train_instant = Instant::now();
+    let mut cache_time = 0.0;
     for (idx, transaction) in transactions.enumerate() {
         let data = transaction.unwrap();
 
@@ -84,22 +93,18 @@ fn train_forest(
         // println!("=M=1 partial_fit {x}");
         mf.partial_fit(&x, y);
 
-        if idx % 25_000 == 0 {
-            let cache_time = Instant::now();
-            // Takes 9-11 ms for a 10.000 nodes tree
+        if CACHE_SORT & (idx % CACHE_FREQ == 0) {
+            let cache_instant = Instant::now();
             mf.cache_sort();
-            println!(
-                "SORETED at inedex: {}, Time: {}ms",
-                idx,
-                cache_time.elapsed().as_micros().to_f32().unwrap() / 1000f32
-            );
+            cache_time += cache_instant.elapsed().as_micros().to_f32().unwrap() / 1000f32;
+            // println!("Sorted at inedex: {}", idx);
         }
     }
+    let train_time = train_instant.elapsed().as_micros().to_f32().unwrap() / 1000f32;
+    let discounted_time = train_time - cache_time;
 
-    println!(
-        "Time: {}ms",
-        now.elapsed().as_micros().to_f32().unwrap() / 1000f32
-    );
+    println!("Discounted time (total-sorting): {}ms", discounted_time);
+
     // Accuracy does not include first sample.
     println!(
         "Accuracy: {} / {} = {}",
@@ -127,23 +132,4 @@ fn main() {
     let dataset_size = get_dataset_size(transactions_l);
 
     train_forest(&mut mf, &features, &labels, dataset_size);
-    // train_forest(&mut mf, &features, &labels, dataset_size);
-    // train_forest(&mut mf, &features, &labels, dataset_size);
-    // train_forest(&mut mf, &features, &labels, dataset_size);
-    // train_forest(&mut mf, &features, &labels, dataset_size);
-    // train_forest(&mut mf, &features, &labels, dataset_size);
-
-    // let now = Instant::now();
-    // // Takes 9-11 ms for a 10.000 nodes tree
-    // mf.cache_sort();
-    // println!(
-    //     "SORETED Time: {}ms",
-    //     now.elapsed().as_micros().to_f32().unwrap() / 1000f32
-    // );
-
-    // train_forest(&mut mf, &features, &labels, dataset_size);
-    // train_forest(&mut mf, &features, &labels, dataset_size);
-    // train_forest(&mut mf, &features, &labels, dataset_size);
-    // train_forest(&mut mf, &features, &labels, dataset_size);
-    // train_forest(&mut mf, &features, &labels, dataset_size);
 }
