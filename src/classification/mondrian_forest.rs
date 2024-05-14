@@ -1,33 +1,32 @@
-use crate::classification::alias::FType;
 use crate::classification::mondrian_tree::MondrianTreeClassifier;
-
 use ndarray::Array1;
+use num::ToPrimitive;
 
 use std::usize;
 
-pub struct MondrianForestClassifier<F: FType> {
-    trees: Vec<MondrianTreeClassifier<F>>,
+pub struct MondrianForestClassifier {
+    trees: Vec<MondrianTreeClassifier>,
     n_labels: usize,
 }
-impl<F: FType> MondrianForestClassifier<F> {
+impl MondrianForestClassifier {
     pub fn new(n_trees: usize, n_features: usize, n_labels: usize) -> Self {
         let tree_default = MondrianTreeClassifier::new(n_features, n_labels);
         let trees = vec![tree_default; n_trees];
-        MondrianForestClassifier::<F> { trees, n_labels }
+        MondrianForestClassifier { trees, n_labels }
     }
 
     /// Note: In Nel215 codebase should work on multiple records, here it's
     /// working only on one.
     ///
     /// Function in River/LightRiver: "learn_one()"
-    pub fn partial_fit(&mut self, x: &Array1<F>, y: usize) {
+    pub fn partial_fit(&mut self, x: &Array1<f32>, y: usize) {
         for tree in &mut self.trees {
             tree.partial_fit(x, y);
         }
     }
 
-    fn predict_proba(&self, x: &Array1<F>) -> Array1<F> {
-        let mut tot_probs = Array1::<F>::zeros(self.n_labels);
+    fn predict_proba(&self, x: &Array1<f32>) -> Array1<f32> {
+        let mut tot_probs = Array1::zeros(self.n_labels);
         for tree in &self.trees {
             let probs = tree.predict_proba(x);
             assert!(
@@ -37,11 +36,11 @@ impl<F: FType> MondrianForestClassifier<F> {
             );
             tot_probs += &probs;
         }
-        tot_probs /= F::from_usize(self.trees.len()).unwrap();
+        tot_probs /= self.trees.len().to_f32().unwrap();
         tot_probs
     }
 
-    pub fn score(&mut self, x: &Array1<F>, y: usize) -> F {
+    pub fn score(&mut self, x: &Array1<f32>, y: usize) -> f32 {
         let probs = self.predict_proba(x);
         let pred_idx = probs
             .iter()
@@ -50,9 +49,9 @@ impl<F: FType> MondrianForestClassifier<F> {
             .map(|(idx, _)| idx)
             .unwrap();
         if pred_idx == y {
-            F::one()
+            1.0
         } else {
-            F::zero()
+            0.0
         }
     }
 

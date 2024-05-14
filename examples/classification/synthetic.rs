@@ -45,7 +45,7 @@ fn get_dataset_size(transactions: IterCsv<f32, File>) -> usize {
 }
 
 fn train_forest(
-    mf: &mut MondrianForestClassifier<f32>,
+    mf: &mut MondrianForestClassifier,
     features: &Vec<String>,
     labels: &Vec<String>,
     dataset_size: usize,
@@ -125,7 +125,7 @@ fn main() {
     let transactions_c = Synthetic::load_data();
     let labels = get_labels(transactions_c);
     println!("labels: {labels:?}, features: {features:?}");
-    let mut mf: MondrianForestClassifier<f32> =
+    let mut mf: MondrianForestClassifier =
         MondrianForestClassifier::new(n_trees, features.len(), labels.len());
 
     let transactions_l = Synthetic::load_data();
