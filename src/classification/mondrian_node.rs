@@ -1,13 +1,6 @@
 use crate::classification::alias::FType;
-
 use ndarray::{Array1, Array2};
-
-use num::{Float, FromPrimitive};
-
 use std::fmt;
-
-use std::ops::Add;
-
 use std::usize;
 
 /// Node struct

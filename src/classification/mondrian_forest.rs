@@ -3,11 +3,6 @@ use crate::classification::mondrian_tree::MondrianTreeClassifier;
 
 use ndarray::Array1;
 
-use num::{Float, FromPrimitive};
-use rand::prelude::*;
-
-use std::collections::HashMap;
-
 use std::usize;
 
 pub struct MondrianForestClassifier<F: FType> {

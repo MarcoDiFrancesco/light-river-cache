@@ -1,10 +1,8 @@
 use crate::classification::alias::FType;
 use crate::classification::mondrian_node::{Node, Stats};
 
-use half::vec;
 use ndarray::Array1;
 
-use num::{Float, FromPrimitive};
 use rand::prelude::*;
 use rand_distr::{Distribution, Exp};
 
@@ -383,28 +381,33 @@ impl<F: FType> MondrianTreeClassifier<F> {
         self.nodes.len()
     }
 
-    /////////////////////////////////////////////////////////////
-    /// Caching
-    /////////////////////////////////////////////////////////////
+    // //////////////////////////////////////////////////////////
+    //  Caching
+    // //////////////////////////////////////////////////////////
 
-    // Get node with highest count which has still not been visited.
-    fn get_node_highest_chance(
-        &self,
-        nodes: &Vec<(bool, &Node<F>)>,
-        nodes_chances: &Vec<(usize, usize)>,
-    ) -> usize {
-        for (node_idx, _) in nodes_chances {
-            let (is_visited, _) = nodes[*node_idx];
-            if !is_visited {
-                return *node_idx;
+    /// Return 'index of candidate vector' of the candidate with highest count.
+    ///
+    /// TODO: check if this function is useful. It looks like we are always
+    ///       returning index 0.
+    ///
+    /// e.g. get_node_highest_prob(candidates=[(11, 3), (1, 3), (9, 2)]) -> 0
+    fn get_node_highest_prob(&self, candidates: &Vec<(usize, usize)>) -> (usize, usize) {
+        let mut max_count = 0;
+        let mut max_idx = 0;
+        for (idx, (_, node_count)) in candidates.iter().enumerate() {
+            if node_count > &max_count {
+                max_count = *node_count;
+                max_idx = idx;
             }
         }
-        panic!("Should not get here");
+        candidates[max_idx]
     }
 
-    /// Given a starting node 'node_idx' find path with highest count.
-    /// e.g. node_idx=0 -> [0, 1, 3]
-    /// e.g. node_idx=2 -> [2, 5]
+    /// Given a starting node index i find path with highest count.
+    ///
+    /// e.g. considering tree below
+    ///     get_node_chain(0, candidates) -> [(0, 10), (1, 7), (3, 5)]
+    ///     get_node_chain(2, candidates) -> [(2, 3), (5, 2)]
     ///
     /// ┌─ Node 0: count=10
     /// │  ├─ Node 1: count=7
@@ -413,32 +416,35 @@ impl<F: FType> MondrianTreeClassifier<F> {
     /// │  └─ Node 2: count=3
     /// │     ├─ Node 5: count=2
     /// │     └─ Node 6: count=1
-    fn get_node_chain(&self, node_idx: usize, nodes: &Vec<(bool, &Node<F>)>) -> Vec<usize> {
-        let mut node_chain = vec![];
-        let (_, mut node) = nodes[node_idx];
-        node_chain.push(node_idx);
-        loop {
-            if node.is_leaf {
-                return node_chain;
-            }
-            let left_idx = node.left.unwrap();
-            let right_idx = node.right.unwrap();
-            let count_l = self.nodes[left_idx].stats.counts.sum();
-            let count_r = self.nodes[right_idx].stats.counts.sum();
-            let node_idx = if count_l >= count_r {
-                left_idx
+    fn get_node_chain(
+        &self,
+        i: (usize, usize),
+        candidates: &mut Vec<(usize, usize)>,
+    ) -> Vec<(usize, usize)> {
+        let mut set = vec![i];
+        let mut node = &self.nodes[i.0];
+        let mut i;
+        while !node.is_leaf {
+            let idx_l = node.left.unwrap();
+            let idx_r = node.right.unwrap();
+            let count_l = self.nodes[idx_l].stats.counts.sum();
+            let count_r = self.nodes[idx_r].stats.counts.sum();
+            if count_l >= count_r {
+                // Add right to candidates
+                candidates.push((idx_r, count_r));
+                // Set i to left
+                node = &self.nodes[idx_l];
+                i = (idx_l, count_l);
             } else {
-                right_idx
+                candidates.push((idx_l, count_l));
+                node = &self.nodes[idx_r];
+                i = (idx_r, count_r);
             };
-            (_, node) = nodes[node_idx];
-            node_chain.push(node_idx);
+            set.push(i);
         }
+        set
     }
 
-    /// Get ordered nodes according to [1].
-    /// [1] Chen et al. (2022). Efficient Realization of Decision Trees for Real-Time Inference.
-    ///     ACM Transactions on Embedded Computing Systems, 21(6), 1–26. https://doi.org/10.1145/3508019
-    ///
     /// Returns e.g. [0, 1, 3, 2, 5, 4, 6]
     ///
     /// ┌─ Node 0: count=10
@@ -448,40 +454,51 @@ impl<F: FType> MondrianTreeClassifier<F> {
     /// │  └─ Node 2: count=3
     /// │     ├─ Node 5: count=2
     /// │     └─ Node 6: count=1
-    fn get_new_index_order(&self) -> Vec<usize> {
-        // nodes: [(is_visited, Node)]
-        // e.g. [(false, node1), (true, node2), ...]
-        let mut nodes: Vec<(bool, &Node<F>)> = self.nodes.iter().map(|n| (false, n)).collect();
+    fn get_optimized_tree_order(&self) -> Vec<usize> {
+        // root: (node_idx, node_count)
+        let root = {
+            // Order node by count in reverse order.
+            // nodes_probs: [(node_idx, node_count)]
+            // Example tree in docstring: [(0, 10), (1, 7), (3, 5), ...]
+            let mut nodes_probs: Vec<(usize, usize)> = self
+                .nodes
+                .iter()
+                .enumerate()
+                .map(|(i, n)| (i, n.stats.counts.sum()))
+                .collect();
+            nodes_probs.sort_by_key(|k| k.1);
+            nodes_probs.reverse();
+            nodes_probs[0]
+        };
+        // A
+        let mut new_order: Vec<(usize, usize)> = vec![];
+        // C
+        let mut candidates = vec![root];
+        while !candidates.is_empty() {
+            let i = self.get_node_highest_prob(&candidates);
+            // Remove candidate
+            candidates.remove(candidates.iter().position(|x| *x == i).unwrap());
+            // S
+            let set = self.get_node_chain(i, &mut candidates);
+            new_order.extend(&set);
 
-        // nodes_chances reversed: [(node_idx, node_count)]
-        // e.g. [(0, 10), (2, 8), (1, 7), ...]
-        let mut nodes_chances: Vec<(usize, usize)> = self
-            .nodes
-            .iter()
-            .enumerate()
-            .map(|(i, n)| (i, n.stats.counts.sum()))
-            .collect();
-        nodes_chances.sort_by_key(|k| k.1);
-        nodes_chances.reverse();
-
-        let mut ordered_indicies = vec![];
-        while nodes.len() != ordered_indicies.len() {
-            let node_idx = self.get_node_highest_chance(&nodes, &nodes_chances);
-            let node_chain = self.get_node_chain(node_idx, &nodes);
-            ordered_indicies.extend(&node_chain);
-            for i in node_chain {
-                nodes[i].0 = true;
-            }
-            assert!(ordered_indicies.len() <= nodes.len());
+            // println!(
+            //     "set: {:?},\nnew_order: {:?}\ncandidates: {:?}\n",
+            //     set.to_vec(),
+            //     new_order.to_vec(),
+            //     candidates.to_vec(),
+            // );
         }
-        ordered_indicies
+        assert!(new_order.len() == self.nodes.len());
+        // From [(0, 10), (1, 7), (3, 5), ...] to [0, 1, 3, ...]
+        new_order.iter().map(|(idx, _)| *idx).collect()
     }
 
-    /// Nodes in the vector are sorted by the likelihood of access. By arranging nodes
-    /// so that the most probable next node is positioned next in the vector, spatial
-    /// locality is enhanced, improving cache efficiency.
+    /// Sort nodes in the tree by the likelihood of access. Arrange the nodes
+    /// so that the most probable next node is positioned next in the vector.
     ///
-    /// Follows implementation by [1].
+    /// Follows implementation by [1] algorithm 2 'Optimized native Tree'.
+    ///
     /// [1] Chen et al. (2022). Efficient Realization of Decision Trees for Real-Time Inference.
     ///     ACM Transactions on Embedded Computing Systems, 21(6), 1–26. https://doi.org/10.1145/3508019
     ///
@@ -502,9 +519,8 @@ impl<F: FType> MondrianTreeClassifier<F> {
     /// │     ├─ Node 4: count=2
     /// │     └─ Node 6: count=1
     pub fn cache_sort(&mut self) {
-        // println!("cache_sort() - tree pre {}", self);
-
-        let new_order: Vec<usize> = self.get_new_index_order();
+        // println!("cache_sort() - tree: {}", self);
+        let new_order: Vec<usize> = self.get_optimized_tree_order();
 
         // e.g. new_order=[2, 0, 1] -> [2]=0, [0]=1, [1]=2 -> new_order_mapped=[1, 2, 0]
         let mut new_order_mapped = vec![0; new_order.len()];
@@ -512,7 +528,8 @@ impl<F: FType> MondrianTreeClassifier<F> {
             new_order_mapped[value] = index;
         }
 
-        let mut nodes_reordered: Vec<Node<F>> = Vec::with_capacity(self.nodes.len());
+        // Allocate ordered nodes in new vector
+        let mut nodes_reordered = Vec::with_capacity(self.nodes.len());
         for i in &new_order {
             let mut new_node = self.nodes[*i].clone();
             new_node.right = new_node.right.map(|v| new_order_mapped[v]);
@@ -520,16 +537,16 @@ impl<F: FType> MondrianTreeClassifier<F> {
             new_node.parent = new_node.parent.map(|v| new_order_mapped[v]);
             nodes_reordered.push(new_node);
         }
-
         self.nodes = nodes_reordered;
 
+        // Change root
         self.root = Some(0);
         assert!(
             self.nodes[self.root.unwrap()].time == F::zero(),
             "New order does not set root correctly. Found time of root: {}, instead of 0.",
             self.nodes[self.root.unwrap()].time
         );
-        // self.test_tree();
+        self.test_tree();
         // println!("cache_sort() - tree post {}", self);
     }
 }

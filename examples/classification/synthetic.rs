@@ -83,6 +83,17 @@ fn train_forest(
 
         // println!("=M=1 partial_fit {x}");
         mf.partial_fit(&x, y);
+
+        if idx % 25_000 == 0 {
+            let cache_time = Instant::now();
+            // Takes 9-11 ms for a 10.000 nodes tree
+            mf.cache_sort();
+            println!(
+                "SORETED at inedex: {}, Time: {}ms",
+                idx,
+                cache_time.elapsed().as_micros().to_f32().unwrap() / 1000f32
+            );
+        }
     }
 
     println!(
@@ -123,12 +134,13 @@ fn main() {
     // train_forest(&mut mf, &features, &labels, dataset_size);
 
     // let now = Instant::now();
-    // // Takes ~20ms for a 10.000 nodes tree
+    // // Takes 9-11 ms for a 10.000 nodes tree
     // mf.cache_sort();
     // println!(
     //     "SORETED Time: {}ms",
     //     now.elapsed().as_micros().to_f32().unwrap() / 1000f32
     // );
+
     // train_forest(&mut mf, &features, &labels, dataset_size);
     // train_forest(&mut mf, &features, &labels, dataset_size);
     // train_forest(&mut mf, &features, &labels, dataset_size);
