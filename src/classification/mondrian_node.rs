@@ -1,23 +1,23 @@
+use crate::classification::alias::FType;
 use ndarray::{Array1, Array2};
-use num::ToPrimitive;
 use std::fmt;
 use std::usize;
 
 /// Node struct
 #[derive(Clone)]
-pub struct Node {
+pub struct Node<F> {
     pub parent: Option<usize>,
-    pub time: f32, // Time: how much I increased the size of the box
+    pub time: F, // Time: how much I increased the size of the box
     pub is_leaf: bool,
-    pub min_list: Array1<f32>, // Lists representing the minimum and maximum values of the data points contained in the current node
-    pub max_list: Array1<f32>,
+    pub min_list: Array1<F>, // Lists representing the minimum and maximum values of the data points contained in the current node
+    pub max_list: Array1<F>,
     pub feature: usize, // Feature in which a split occurs
-    pub threshold: f32, // Threshold in which the split occures
+    pub threshold: F,   // Threshold in which the split occures
     pub left: Option<usize>,
     pub right: Option<usize>,
-    pub stats: Stats,
+    pub stats: Stats<F>,
 }
-impl fmt::Display for Node {
+impl<F: FType + fmt::Display> fmt::Display for Node<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -34,11 +34,11 @@ impl fmt::Display for Node {
     }
 }
 
-impl Node {
-    pub fn add_to_leaf(&mut self, x: &Array1<f32>, y: usize) {
+impl<F: FType> Node<F> {
+    pub fn add_to_leaf(&mut self, x: &Array1<F>, y: usize) {
         self.stats.add(x, y);
     }
-    pub fn get_stats_from_children(&self, left_s: &Stats, right_s: &Stats) -> Stats {
+    pub fn get_stats_from_children(&self, left_s: &Stats<F>, right_s: &Stats<F>) -> Stats<F> {
         left_s.merge(right_s)
     }
     /// Check if all the labels are the same in the node.
@@ -54,13 +54,13 @@ impl Node {
 ///
 /// In nel215 code it is "Classifier"
 #[derive(Clone)]
-pub struct Stats {
-    sums: Array2<f32>,
-    sq_sums: Array2<f32>,
+pub struct Stats<F> {
+    sums: Array2<F>,
+    sq_sums: Array2<F>,
     pub counts: Array1<usize>,
     n_labels: usize,
 }
-impl fmt::Display for Stats {
+impl<F: FType + fmt::Display> fmt::Display for Stats<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "\n┌ Stats")?;
         // sums
@@ -80,20 +80,20 @@ impl fmt::Display for Stats {
         Ok(())
     }
 }
-impl Stats {
+impl<F: FType> Stats<F> {
     pub fn new(n_labels: usize, n_features: usize) -> Self {
         Stats {
-            sums: Array2::<f32>::zeros((n_labels, n_features)),
-            sq_sums: Array2::<f32>::zeros((n_labels, n_features)),
+            sums: Array2::zeros((n_labels, n_features)),
+            sq_sums: Array2::zeros((n_labels, n_features)),
             counts: Array1::zeros(n_labels),
             n_labels,
         }
     }
-    pub fn create_result(&self, x: &Array1<f32>, w: f32) -> Array1<f32> {
+    pub fn create_result(&self, x: &Array1<F>, w: F) -> Array1<F> {
         let probs = self.predict_proba(x);
         probs * w
     }
-    fn add(&mut self, x: &Array1<f32>, y: usize) {
+    fn add(&mut self, x: &Array1<F>, y: usize) {
         // Same as: self.sums[y] += x;
         self.sums.row_mut(y).zip_mut_with(&x, |a, &b| *a += b);
 
@@ -104,7 +104,7 @@ impl Stats {
             .zip_mut_with(&x, |a, &b| *a += b * b);
         self.counts[y] += 1;
     }
-    fn merge(&self, s: &Stats) -> Stats {
+    fn merge(&self, s: &Stats<F>) -> Stats<F> {
         Stats {
             sums: self.sums.clone() + &s.sums,
             sq_sums: self.sq_sums.clone() + &s.sq_sums,
@@ -112,9 +112,9 @@ impl Stats {
             n_labels: self.n_labels,
         }
     }
-    pub fn predict_proba(&self, x: &Array1<f32>) -> Array1<f32> {
+    pub fn predict_proba(&self, x: &Array1<F>) -> Array1<F> {
         let mut probs = Array1::zeros(self.n_labels);
-        let mut sum_prob = 0.0;
+        let mut sum_prob = F::zero();
 
         // println!("predict_proba() - start {}", self);
 
@@ -125,22 +125,22 @@ impl Stats {
             .zip(self.counts.iter())
             .enumerate()
         {
-            let epsilon = f32::EPSILON;
-            let count_f = count.to_f32().unwrap();
+            let epsilon = F::epsilon();
+            let count_f = F::from_usize(count).unwrap();
             let avg = &sum / count_f;
             let var = (&sq_sum / count_f) - (&avg * &avg) + epsilon;
-            let sigma = (&var * count_f) / (count_f - 1.0 + epsilon);
-            let pi = std::f32::consts::PI * 2.0;
+            let sigma = (&var * count_f) / (count_f - F::one() + epsilon);
+            let pi = F::from_f32(std::f32::consts::PI).unwrap() * F::from_f32(2.0).unwrap();
             let z = pi.powi(x.len() as i32) * sigma.mapv(|s| s * s).sum().sqrt();
             // Dot product
             let dot_feature = (&(x - &avg) * &(x - &avg)).sum();
             let dot_sigma = (&sigma * &sigma).sum();
-            let exponent = -0.5 * dot_feature / dot_sigma;
+            let exponent = -F::from_f32(0.5).unwrap() * dot_feature / dot_sigma;
             // epsilon added since exponent.exp() could be zero if exponent is very small
             let mut prob = (exponent.exp() + epsilon) / z;
             if count <= 0 {
                 assert!(prob.is_nan(), "Probabaility should be NaN. Found: {prob}.");
-                prob = 0.0;
+                prob = F::zero();
             }
             sum_prob += prob;
             probs[index] = prob;
@@ -148,7 +148,7 @@ impl Stats {
 
         // Check at least one probability is non-zero. Otherwise we have division by zero.
         assert!(
-            !probs.iter().all(|&x| x == 0.0),
+            !probs.iter().all(|&x| x == F::zero()),
             "At least one probability should not be zero. Found: {:?}.",
             probs.to_vec()
         );

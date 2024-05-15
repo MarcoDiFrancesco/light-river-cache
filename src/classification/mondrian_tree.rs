@@ -1,3 +1,4 @@
+use crate::classification::alias::FType;
 use crate::classification::mondrian_node::{Node, Stats};
 use ndarray::Array1;
 use rand::prelude::*;
@@ -7,21 +8,21 @@ use std::fmt;
 use std::usize;
 
 #[derive(Clone)]
-pub struct MondrianTreeClassifier {
+pub struct MondrianTreeClassifier<F: FType> {
     n_features: usize,
     n_labels: usize,
     rng: ThreadRng,
-    nodes: Vec<Node>,
+    nodes: Vec<Node<F>>,
     root: Option<usize>,
 }
 
-impl fmt::Display for MondrianTreeClassifier {
+impl<F: FType + fmt::Display> fmt::Display for MondrianTreeClassifier<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "\n┌ MondrianTreeClassifier")?;
         self.recursive_repr(self.root, f, "│ ")
     }
 }
-impl MondrianTreeClassifier {
+impl<F: FType + fmt::Display> MondrianTreeClassifier<F> {
     /// Helper method to recursively format node details.
     fn recursive_repr(
         &self,
@@ -63,9 +64,9 @@ impl MondrianTreeClassifier {
     }
 }
 
-impl MondrianTreeClassifier {
+impl<F: FType> MondrianTreeClassifier<F> {
     pub fn new(n_features: usize, n_labels: usize) -> Self {
-        MondrianTreeClassifier {
+        MondrianTreeClassifier::<F> {
             n_features,
             n_labels,
             rng: rand::thread_rng(),
@@ -74,21 +75,15 @@ impl MondrianTreeClassifier {
         }
     }
 
-    fn create_leaf(
-        &mut self,
-        x: &Array1<f32>,
-        y: usize,
-        parent: Option<usize>,
-        time: f32,
-    ) -> usize {
-        let mut node = Node {
+    fn create_leaf(&mut self, x: &Array1<F>, y: usize, parent: Option<usize>, time: F) -> usize {
+        let mut node = Node::<F> {
             parent,
-            time, // f32::from(1e9).unwrap(), // Very large value
+            time, // F::from(1e9).unwrap(), // Very large value
             is_leaf: true,
             min_list: x.clone(),
             max_list: x.clone(),
             feature: 0,
-            threshold: 0.0,
+            threshold: F::zero(),
             left: None,
             right: None,
             stats: Stats::new(self.n_labels, self.n_features),
@@ -130,21 +125,21 @@ impl MondrianTreeClassifier {
 
     fn compute_split_time(
         &self,
-        time: f32,
-        exp_sample: f32,
+        time: F,
+        exp_sample: F,
         node_idx: usize,
         y: usize,
-        extensions_sum: f32,
-    ) -> f32 {
+        extensions_sum: F,
+    ) -> F {
         if self.nodes[node_idx].is_dirac(y) {
             // println!(
             //     "go_downwards() - node: {node_idx} - extensions_sum: {:?} - all same class",
             //     extensions_sum
             // );
-            return 0.0;
+            return F::zero();
         }
 
-        if extensions_sum > 0.0 {
+        if extensions_sum > F::zero() {
             let split_time = time + exp_sample;
 
             // From River: If the node is a leaf we must split it
@@ -176,58 +171,64 @@ impl MondrianTreeClassifier {
             // );
         }
 
-        0.0
+        F::zero()
     }
 
-    fn go_downwards(&mut self, node_idx: usize, x: &Array1<f32>, y: usize) -> usize {
+    fn go_downwards(&mut self, node_idx: usize, x: &Array1<F>, y: usize) -> usize {
         let time = self.nodes[node_idx].time;
         let node_min_list = &self.nodes[node_idx].min_list;
         let node_max_list = &self.nodes[node_idx].max_list;
         let extensions = {
-            let e_min = (node_min_list - x).mapv(|v| f32::max(v, 0.0));
-            let e_max = (x - node_max_list).mapv(|v| f32::max(v, 0.0));
+            let e_min = (node_min_list - x).mapv(|v| F::max(v, F::zero()));
+            let e_max = (x - node_max_list).mapv(|v| F::max(v, F::zero()));
             &e_min + &e_max
         };
         // 'T' in River
         let exp_sample = {
             let lambda = extensions.sum();
-            let exp_dist = Exp::new(lambda).unwrap();
-            let exp_sample = exp_dist.sample(&mut self.rng);
+            let exp_dist = Exp::new(lambda.to_f32().unwrap()).unwrap();
+            let exp_sample = F::from_f32(exp_dist.sample(&mut self.rng)).unwrap();
             // DEBUG: shadowing with Exp expected value
-            let exp_sample = 1.0 / lambda;
+            let exp_sample = F::one() / lambda;
             exp_sample
         };
         let split_time = self.compute_split_time(time, exp_sample, node_idx, y, extensions.sum());
-        if split_time > 0.0 {
+        if split_time > F::zero() {
             // Here split the current node: if leaf we add children, otherwise
             // we add a new node along the path
             let feature = {
                 let cumsum = extensions
                     .iter()
-                    .scan(0.0, |acc, &x| {
+                    .scan(F::zero(), |acc, &x| {
                         *acc = *acc + x;
                         Some(*acc)
                     })
-                    .collect::<Array1<f32>>();
-                let e_sample = self.rng.gen::<f32>() * extensions.sum();
+                    .collect::<Array1<F>>();
+                let e_sample = F::from_f32(self.rng.gen::<f32>()).unwrap() * extensions.sum();
                 // DEBUG: shadowing with expected value
-                let e_sample = 0.5 * extensions.sum();
+                let e_sample = F::from_f32(0.5).unwrap() * extensions.sum();
                 cumsum.iter().position(|&val| val > e_sample).unwrap()
             };
 
             let (lower_bound, upper_bound) = if x[feature] > node_min_list[feature] {
-                (node_min_list[feature], x[feature])
+                (
+                    node_min_list[feature].to_f32().unwrap(),
+                    x[feature].to_f32().unwrap(),
+                )
             } else {
-                (x[feature], node_max_list[feature])
+                (
+                    x[feature].to_f32().unwrap(),
+                    node_max_list[feature].to_f32().unwrap(),
+                )
             };
-            let threshold = self.rng.gen_range(lower_bound..upper_bound);
+            let threshold = F::from_f32(self.rng.gen_range(lower_bound..upper_bound)).unwrap();
             // DEBUG: split in the middle
-            let threshold = (lower_bound + upper_bound) / 2.0;
+            let threshold = F::from_f32((lower_bound + upper_bound) / 2.0).unwrap();
 
             let mut min_list = node_min_list.clone();
             let mut max_list = node_max_list.clone();
-            min_list.zip_mut_with(x, |a, &b| *a = f32::min(*a, b));
-            max_list.zip_mut_with(x, |a, &b| *a = f32::max(*a, b));
+            min_list.zip_mut_with(x, |a, &b| *a = F::min(*a, b));
+            max_list.zip_mut_with(x, |a, &b| *a = F::max(*a, b));
 
             // Create and push new parent node
             let parent_node = Node {
@@ -271,8 +272,8 @@ impl MondrianTreeClassifier {
 
             let node = &mut self.nodes[node_idx];
             // println!("pre - node: {:?}, node range: ({:?}-{:?}), x: {:?}", node_idx, node.min_list.to_vec(), node.max_list.to_vec(), x.to_vec());
-            node.min_list.zip_mut_with(x, |a, b| *a = f32::min(*a, *b));
-            node.max_list.zip_mut_with(x, |a, b| *a = f32::max(*a, *b));
+            node.min_list.zip_mut_with(x, |a, b| *a = F::min(*a, *b));
+            node.max_list.zip_mut_with(x, |a, b| *a = F::max(*a, *b));
             // println!("post- node: {:?}, node range: ({:?}-{:?}), x: {:?}", node_idx, node.min_list.to_vec(), node.max_list.to_vec(), x.to_vec());
 
             if node.is_leaf {
@@ -311,9 +312,9 @@ impl MondrianTreeClassifier {
     /// working only on one.
     ///
     /// Function in River/LightRiver: "learn_one()"
-    pub fn partial_fit(&mut self, x: &Array1<f32>, y: usize) {
+    pub fn partial_fit(&mut self, x: &Array1<F>, y: usize) {
         self.root = match self.root {
-            None => Some(self.create_leaf(x, y, None, 0.0)),
+            None => Some(self.create_leaf(x, y, None, F::zero())),
             Some(root_idx) => Some(self.go_downwards(root_idx, x, y)),
         };
         // println!("partial_fit() tree post {}", self);
@@ -325,13 +326,13 @@ impl MondrianTreeClassifier {
 
     /// Note: In Nel215 codebase should work on multiple records, here it's
     /// working only on one, so it's the same as "predict()".
-    pub fn predict_proba(&self, x: &Array1<f32>) -> Array1<f32> {
+    pub fn predict_proba(&self, x: &Array1<F>) -> Array1<F> {
         // println!("predict_proba() - tree size: {}", self.nodes.len());
         // self.test_tree();
-        self.predict(x, self.root.unwrap(), 1.0)
+        self.predict(x, self.root.unwrap(), F::one())
     }
 
-    fn predict(&self, x: &Array1<f32>, node_idx: usize, p_not_separated_yet: f32) -> Array1<f32> {
+    fn predict(&self, x: &Array1<F>, node_idx: usize, p_not_separated_yet: F) -> Array1<F> {
         let node = &self.nodes[node_idx];
 
         // Probability 'p' of the box not splitting.
@@ -339,16 +340,16 @@ impl MondrianTreeClassifier {
         //     d (time delta with parent): more dist with parent, more prob of splitting
         let p = {
             let d = node.time - self.get_parent_time(node_idx);
-            let dist_max = (x - &node.max_list).mapv(|v| f32::max(v, 0.0));
-            let dist_min = (&node.min_list - x).mapv(|v| f32::max(v, 0.0));
+            let dist_max = (x - &node.max_list).mapv(|v| F::max(v, F::zero()));
+            let dist_min = (&node.min_list - x).mapv(|v| F::max(v, F::zero()));
             let eta = dist_min.sum() + dist_max.sum();
-            1.0 - (-d * eta).exp()
+            F::one() - (-d * eta).exp()
         };
 
         // Generate a result for the current node using its statistics.
         let res = node.stats.create_result(x, p_not_separated_yet * p);
 
-        let w = p_not_separated_yet * (1.0 - p);
+        let w = p_not_separated_yet * (F::one() - p);
         if node.is_leaf {
             let res2 = node.stats.create_result(x, w);
             return res + res2;
@@ -363,11 +364,11 @@ impl MondrianTreeClassifier {
         }
     }
 
-    fn get_parent_time(&self, node_idx: usize) -> f32 {
+    fn get_parent_time(&self, node_idx: usize) -> F {
         // If node is root, time is 0
         match self.nodes[node_idx].parent {
             Some(parent_idx) => self.nodes[parent_idx].time,
-            None => 0.0,
+            None => F::from_f32(0.0).unwrap(),
         }
     }
 
@@ -536,7 +537,7 @@ impl MondrianTreeClassifier {
         // Change root
         self.root = Some(0);
         assert!(
-            self.nodes[self.root.unwrap()].time == 0.0,
+            self.nodes[self.root.unwrap()].time == F::zero(),
             "New order does not set root correctly. Found time of root: {}, instead of 0.",
             self.nodes[self.root.unwrap()].time
         );
