@@ -1,5 +1,8 @@
 use crate::classification::alias::FType;
 use ndarray::{Array1, Array2};
+
+use num::{Float, FromPrimitive, ToPrimitive};
+
 use std::fmt;
 use std::usize;
 
@@ -9,8 +12,8 @@ pub struct Node<F> {
     pub parent: Option<usize>,
     pub time: F, // Time: how much I increased the size of the box
     pub is_leaf: bool,
-    pub min_list: Array1<F>, // Lists representing the minimum and maximum values of the data points contained in the current node
-    pub max_list: Array1<F>,
+    pub range_min: Array1<F>, // Lists representing the minimum and maximum values of the data points contained in the current node
+    pub range_max: Array1<F>,
     pub feature: usize, // Feature in which a split occurs
     pub threshold: F,   // Threshold in which the split occures
     pub left: Option<usize>,
@@ -21,13 +24,10 @@ impl<F: FType + fmt::Display> fmt::Display for Node<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Node<left={:?}, right={:?}, parent={:?}, time={:.3}, min={:?}, max={:?}, counts={:?}>",
-            self.left,
-            self.right,
-            self.parent,
+            "Node<time={:.3}, min={:?}, max={:?}, counts={:?}>",
             self.time,
-            self.min_list.to_vec(),
-            self.max_list.to_vec(),
+            self.range_min.to_vec(),
+            self.range_max.to_vec(),
             self.stats.counts.to_vec(),
         )?;
         Ok(())
@@ -35,7 +35,7 @@ impl<F: FType + fmt::Display> fmt::Display for Node<F> {
 }
 
 impl<F: FType> Node<F> {
-    pub fn add_to_leaf(&mut self, x: &Array1<F>, y: usize) {
+    pub fn update_leaf(&mut self, x: &Array1<F>, y: usize) {
         self.stats.add(x, y);
     }
     pub fn get_stats_from_children(&self, left_s: &Stats<F>, right_s: &Stats<F>) -> Stats<F> {
@@ -93,16 +93,20 @@ impl<F: FType> Stats<F> {
         let probs = self.predict_proba(x);
         probs * w
     }
-    fn add(&mut self, x: &Array1<F>, y: usize) {
+    pub fn add(&mut self, x: &Array1<F>, y: usize) {
+        // Checked on May 29th on few samples, looks correct
+        // println!("add() - x={x}, y={y}, count={}, \nsums={}, \nsq_sums={}", self.counts, self.sums, self.sq_sums);
+
         // Same as: self.sums[y] += x;
         self.sums.row_mut(y).zip_mut_with(&x, |a, &b| *a += b);
-
         // Same as: self.sq_sums[y] += x*x;
         // e.g. x: [1.059 0.580] -> x*x: [1.122  0.337]
         self.sq_sums
             .row_mut(y)
             .zip_mut_with(&x, |a, &b| *a += b * b);
         self.counts[y] += 1;
+
+        // println!("      - y={y}, count={}, \nsums={}, \nsq_sums={}", self.counts, self.sums, self.sq_sums);
     }
     fn merge(&self, s: &Stats<F>) -> Stats<F> {
         Stats {
@@ -112,19 +116,24 @@ impl<F: FType> Stats<F> {
             n_labels: self.n_labels,
         }
     }
+    /// Return probabilities of sample 'x' belonging to each class.
     pub fn predict_proba(&self, x: &Array1<F>) -> Array1<F> {
         let mut probs = Array1::zeros(self.n_labels);
-        let mut sum_prob = F::zero();
 
         // println!("predict_proba() - start {}", self);
 
-        for (index, ((sum, sq_sum), &count)) in self
+        // println!("var aware est   - counts: {}", self.counts);
+
+        // Iterate over each label
+        for (idx, ((sum, sq_sum), &count)) in self
             .sums
             .outer_iter()
             .zip(self.sq_sums.outer_iter())
             .zip(self.counts.iter())
             .enumerate()
         {
+            // println!("                - idx: {idx}, count: {count}, sum: {sum}, sq_sum: {sq_sum}");
+
             let epsilon = F::epsilon();
             let count_f = F::from_usize(count).unwrap();
             let avg = &sum / count_f;
@@ -139,24 +148,27 @@ impl<F: FType> Stats<F> {
             // epsilon added since exponent.exp() could be zero if exponent is very small
             let mut prob = (exponent.exp() + epsilon) / z;
             if count <= 0 {
-                assert!(prob.is_nan(), "Probabaility should be NaN. Found: {prob}.");
+                // prob is NaN
                 prob = F::zero();
             }
-            sum_prob += prob;
-            probs[index] = prob;
+            probs[idx] = prob;
+
+            // DEBUG: stop using variance aware estimation
+            probs[idx] = count_f;
         }
 
-        // Check at least one probability is non-zero. Otherwise we have division by zero.
-        assert!(
-            !probs.iter().all(|&x| x == F::zero()),
-            "At least one probability should not be zero. Found: {:?}.",
-            probs.to_vec()
-        );
-
+        if probs.iter().all(|&x| x == F::zero()) {
+            // [0, 0, 0] -> [0.33, 0.33, 0.33]
+            probs = probs
+                .iter()
+                .map(|_| F::one() / F::from_f32(probs.len().to_f32().unwrap()).unwrap())
+                .collect();
+        }
+        let probs_sum = probs.sum();
         for prob in probs.iter_mut() {
-            *prob /= sum_prob;
+            *prob /= probs_sum;
         }
-        // println!("predict_proba() post - probs: {:?}", probs.to_vec());
+        // println!("                - probs out: {}", probs);
         probs
     }
 }

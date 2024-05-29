@@ -51,7 +51,7 @@ fn main() {
     // DEBUG: remove it
     // let labels = labels[0..3].to_vec();
     println!("labels: {labels:?}");
-    let mut mf: MondrianForestClassifier =
+    let mut mf: MondrianForestClassifier<f32> =
         MondrianForestClassifier::new(n_trees, features.len(), labels.len());
 
     let transactions = Keystroke::load_data().unwrap();
