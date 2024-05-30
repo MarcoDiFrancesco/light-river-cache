@@ -1,4 +1,4 @@
-use csv::Writer;
+use csv::{Writer, WriterBuilder};
 use light_river::classification::mondrian_forest::MondrianForestClassifier;
 
 use light_river::common::ClassifierTarget;
@@ -63,27 +63,35 @@ fn train_forest(
         println!("No cache sort");
     }
 
-    std::fs::File::create("run_synthetic_output_train_times.csv").unwrap();
-    let mut wtr_train_times = Writer::from_writer(
-        OpenOptions::new()
-            .append(true)
-            .open("run_synthetic_output_train_times.csv")
-            .unwrap(),
-    );
+    std::fs::File::create("run_synthetic_output_times.csv").unwrap();
+    let mut wtr_train_times = WriterBuilder::new()
+        .quote_style(csv::QuoteStyle::Never)
+        .from_writer(
+            OpenOptions::new()
+                .append(true)
+                .open("run_synthetic_output_times.csv")
+                .unwrap(),
+        );
+
     std::fs::File::create("run_synthetic_output_tree_size.csv").unwrap();
-    let mut wtr_tree_size = Writer::from_writer(
-        OpenOptions::new()
-            .append(true)
-            .open("run_synthetic_output_tree_size.csv")
-            .unwrap(),
-    );
+    let mut wtr_tree_size = WriterBuilder::new()
+        .quote_style(csv::QuoteStyle::Never)
+        .from_writer(
+            OpenOptions::new()
+                .append(true)
+                .open("run_synthetic_output_tree_size.csv")
+                .unwrap(),
+        );
+
     std::fs::File::create("run_synthetic_output_depth.csv").unwrap();
-    let mut wtr_depth = Writer::from_writer(
-        OpenOptions::new()
-            .append(true)
-            .open("run_synthetic_output_depth.csv")
-            .unwrap(),
-    );
+    let mut wtr_depth = WriterBuilder::new()
+        .quote_style(csv::QuoteStyle::Never)
+        .from_writer(
+            OpenOptions::new()
+                .append(true)
+                .open("run_synthetic_output_depth.csv")
+                .unwrap(),
+        );
 
     let mut train_time_tot = 0.0;
     for (idx, transaction) in transactions.enumerate() {
@@ -122,7 +130,8 @@ fn train_forest(
         mf.partial_fit(&x, y);
         let fit_time = fit_instant.elapsed().as_nanos();
 
-        train_time_str.push_str(format!("{},{}", score_time, fit_time).as_str());
+        train_time_str
+            .push_str(format!("{},{},{}", score_time, fit_time, score_time + fit_time).as_str());
         train_time_tot += score_instant.elapsed().as_micros().to_f32().unwrap() / 1_000f32;
 
         if CACHE_SORT & (idx % CACHE_FREQ == 0) {
@@ -138,9 +147,9 @@ fn train_forest(
             wtr_tree_size.flush().unwrap();
 
             // Mesure depths
-            let (optim, _, max) = mf.get_forest_depth();
+            let (node_n, optim, avg, avg_w, max) = mf.get_forest_depth();
             // Excluding avg. Not useful for now.
-            let depth_str = format!("{},{}", optim, max);
+            let depth_str = format!("{},{},{},{},{}", node_n, optim, avg, avg_w, max);
             wtr_depth.write_record(&[depth_str]).unwrap();
             wtr_depth.flush().unwrap();
         }

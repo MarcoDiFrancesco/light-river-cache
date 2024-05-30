@@ -3,6 +3,7 @@ use crate::classification::mondrian_node::{Node, Stats};
 use ndarray::Array1;
 use num::Float;
 use num::ToPrimitive;
+use rand::distributions::weighted;
 use rand::prelude::*;
 use rand_distr::{Distribution, Exp};
 use std::collections::HashSet;
@@ -682,40 +683,53 @@ impl<F: FType> MondrianTreeClassifier<F> {
         self.nodes.len()
     }
 
-    pub fn get_tree_depths(&self) -> (f32, f32, f32) {
-        let optim = self.nodes.len().to_f32().unwrap().log2().ceil() as usize;
-
+    /// Returns:
+    /// - Optimal: log2 of #nodes upper bound
+    /// - Average: average depth of nodes
+    /// - Average weighted: ...
+    /// - Max: maximum depth of nodes
+    pub fn get_tree_depths(&self) -> (f32, f32, f32, f32, f32) {
         // Vector to store the depth of each node
         let mut depths = Vec::with_capacity(self.nodes.len());
+        let mut nodes_w = Vec::with_capacity(self.nodes.len());
 
         // Function to recursively compute the depth of a node
         fn compute_depth<F: FType>(
             nodes: &Vec<Node<F>>,
+            root: &Node<F>,
             node_idx: Option<usize>,
             current_depth: usize,
             depths: &mut Vec<usize>,
+            nodes_w: &mut Vec<f32>,
         ) {
             if let Some(idx) = node_idx {
-                depths.push(current_depth);
                 let node = &nodes[idx];
-                compute_depth(nodes, node.left, current_depth + 1, depths);
-                compute_depth(nodes, node.right, current_depth + 1, depths);
+                if node.is_leaf {
+                    depths.push(current_depth);
+                    let weight = node.stats.counts.sum() as f32 / root.stats.counts.sum() as f32;
+                    nodes_w.push(current_depth as f32 * weight);
+                }
+                compute_depth(nodes, root, node.left, current_depth + 1, depths, nodes_w);
+                compute_depth(nodes, root, node.right, current_depth + 1, depths, nodes_w);
             }
         }
 
+        let root = &self.nodes[self.root.unwrap()];
         // Compute depths starting from the root
-        compute_depth(&self.nodes, self.root, 0, &mut depths);
+        compute_depth(&self.nodes, root, self.root, 0, &mut depths, &mut nodes_w);
 
-        // Calculate the average and maximum depth
-        let total_depth: usize = depths.iter().sum();
-        let avg_depth: f32 = total_depth as f32 / depths.len() as f32;
-        let max_depth: usize = *depths.iter().max().unwrap_or(&0);
+        let node_count = self.nodes.len() as f32;
 
-        // Return
-        // - Optimal: log2 of #nodes upper bound
-        // - Average: average depth of nodes
-        // - Max: maximum depth of nodes
-        (optim as f32, avg_depth, max_depth as f32)
+        let optim = self.nodes.len().to_f32().unwrap().log2().ceil();
+
+        let avg_depth = depths.iter().sum::<usize>() as f32 / depths.len() as f32;
+
+        let depths_f: Vec<f32> = depths.iter().map(|&x| x as f32).collect();
+        let w_depths = Array1::from_vec(depths_f) * Array1::from_vec(nodes_w);
+        let avg_w_depth = w_depths.sum();
+
+        let max_depth = *depths.iter().max().unwrap_or(&0);
+        (node_count, optim, avg_depth, avg_w_depth, max_depth as f32)
     }
 
     // //////////////////////////////////////////////////////////

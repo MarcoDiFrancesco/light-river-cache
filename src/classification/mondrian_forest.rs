@@ -66,20 +66,26 @@ impl<F: FType> MondrianForestClassifier<F> {
         sizes.iter().sum()
     }
 
-    pub fn get_forest_depth(&self) -> (f32, f32, f32) {
+    pub fn get_forest_depth(&self) -> (f32, f32, f32, f32, f32) {
+        let mut node_counts = vec![];
         let mut optimals = vec![];
         let mut avgs = vec![];
+        let mut avgs_w = vec![];
         let mut maxs = vec![];
         for t in &self.trees {
-            let (opt, avg, max) = t.get_tree_depths();
+            let (node_count, opt, avg, avg_w, max) = t.get_tree_depths();
+            node_counts.push(node_count);
             optimals.push(opt);
             avgs.push(avg);
+            avgs_w.push(avg_w);
             maxs.push(max);
         }
-        // TODO: divide over #trees
-        let opt: f32 = optimals.iter().sum::<f32>() / optimals.len().to_f32().unwrap();
-        let avg: f32 = avgs.iter().sum::<f32>() / avgs.len().to_f32().unwrap();
-        let max: f32 = maxs.iter().sum::<f32>() / maxs.len().to_f32().unwrap();
-        (opt, avg, max)
+        // Average over #trees
+        let node_n_avg = node_counts.iter().sum::<f32>() / node_counts.len() as f32;
+        let opt: f32 = optimals.iter().sum::<f32>() / optimals.len() as f32;
+        let avg: f32 = avgs.iter().sum::<f32>() / avgs.len() as f32;
+        let avg_w: f32 = avgs_w.iter().sum::<f32>() / avgs_w.len() as f32;
+        let max: f32 = maxs.iter().sum::<f32>() / maxs.len() as f32;
+        (node_n_avg, opt, avg, avg_w, max)
     }
 }

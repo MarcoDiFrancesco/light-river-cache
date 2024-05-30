@@ -120,8 +120,6 @@ impl<F: FType> Stats<F> {
     pub fn predict_proba(&self, x: &Array1<F>) -> Array1<F> {
         let mut probs = Array1::zeros(self.n_labels);
 
-        // println!("predict_proba() - start {}", self);
-
         // println!("var aware est   - counts: {}", self.counts);
 
         // Iterate over each label
