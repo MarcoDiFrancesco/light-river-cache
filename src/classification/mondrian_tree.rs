@@ -2,11 +2,14 @@ use crate::classification::alias::FType;
 use crate::classification::mondrian_node::{Node, Stats};
 use ndarray::Array1;
 use num::Float;
+use num::ToPrimitive;
 use rand::prelude::*;
 use rand_distr::{Distribution, Exp};
 use std::collections::HashSet;
 use std::fmt;
 use std::usize;
+
+const MAX_NODES: usize = 100_000;
 
 #[derive(Clone)]
 pub struct MondrianTreeClassifier<F: FType> {
@@ -100,7 +103,7 @@ impl<F: FType> MondrianTreeClassifier<F> {
             n_features,
             n_labels,
             rng: rand::thread_rng(),
-            nodes: vec![],
+            nodes: Vec::with_capacity(MAX_NODES),
             root: None,
         }
     }
@@ -679,6 +682,42 @@ impl<F: FType> MondrianTreeClassifier<F> {
         self.nodes.len()
     }
 
+    pub fn get_tree_depths(&self) -> (f32, f32, f32) {
+        let optim = self.nodes.len().to_f32().unwrap().log2().ceil() as usize;
+
+        // Vector to store the depth of each node
+        let mut depths = Vec::with_capacity(self.nodes.len());
+
+        // Function to recursively compute the depth of a node
+        fn compute_depth<F: FType>(
+            nodes: &Vec<Node<F>>,
+            node_idx: Option<usize>,
+            current_depth: usize,
+            depths: &mut Vec<usize>,
+        ) {
+            if let Some(idx) = node_idx {
+                depths.push(current_depth);
+                let node = &nodes[idx];
+                compute_depth(nodes, node.left, current_depth + 1, depths);
+                compute_depth(nodes, node.right, current_depth + 1, depths);
+            }
+        }
+
+        // Compute depths starting from the root
+        compute_depth(&self.nodes, self.root, 0, &mut depths);
+
+        // Calculate the average and maximum depth
+        let total_depth: usize = depths.iter().sum();
+        let avg_depth: f32 = total_depth as f32 / depths.len() as f32;
+        let max_depth: usize = *depths.iter().max().unwrap_or(&0);
+
+        // Return
+        // - Optimal: log2 of #nodes upper bound
+        // - Average: average depth of nodes
+        // - Max: maximum depth of nodes
+        (optim as f32, avg_depth, max_depth as f32)
+    }
+
     // //////////////////////////////////////////////////////////
     //  Caching
     // //////////////////////////////////////////////////////////
@@ -826,8 +865,9 @@ impl<F: FType> MondrianTreeClassifier<F> {
             new_order_mapped[value] = index;
         }
 
-        // Allocate ordered nodes in new vector
-        let mut nodes_reordered = Vec::with_capacity(self.nodes.len());
+        // Allocate ordered nodes in new vector. Do not set vector with capacity self.nodes.len(),
+        // this would make the following pushed nodes to reallocate the vector. Talking by experience :)
+        let mut nodes_reordered = Vec::with_capacity(MAX_NODES);
         for i in &new_order {
             let mut new_node = self.nodes[*i].clone();
             new_node.right = new_node.right.map(|v| new_order_mapped[v]);

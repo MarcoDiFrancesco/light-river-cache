@@ -2,6 +2,7 @@ use crate::classification::alias::FType;
 use crate::classification::mondrian_tree::MondrianTreeClassifier;
 
 use ndarray::Array1;
+use num::ToPrimitive;
 
 use std::usize;
 
@@ -60,7 +61,25 @@ impl<F: FType> MondrianForestClassifier<F> {
         }
     }
 
-    pub fn get_forest_size(&self) -> Vec<usize> {
-        self.trees.iter().map(|t| t.get_tree_size()).collect()
+    pub fn get_forest_size(&self) -> usize {
+        let sizes: Vec<usize> = self.trees.iter().map(|t| t.get_tree_size()).collect();
+        sizes.iter().sum()
+    }
+
+    pub fn get_forest_depth(&self) -> (f32, f32, f32) {
+        let mut optimals = vec![];
+        let mut avgs = vec![];
+        let mut maxs = vec![];
+        for t in &self.trees {
+            let (opt, avg, max) = t.get_tree_depths();
+            optimals.push(opt);
+            avgs.push(avg);
+            maxs.push(max);
+        }
+        // TODO: divide over #trees
+        let opt: f32 = optimals.iter().sum::<f32>() / optimals.len().to_f32().unwrap();
+        let avg: f32 = avgs.iter().sum::<f32>() / avgs.len().to_f32().unwrap();
+        let max: f32 = maxs.iter().sum::<f32>() / maxs.len().to_f32().unwrap();
+        (opt, avg, max)
     }
 }

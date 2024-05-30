@@ -1,3 +1,4 @@
+use csv::Writer;
 use light_river::classification::mondrian_forest::MondrianForestClassifier;
 
 use light_river::common::ClassifierTarget;
@@ -6,7 +7,8 @@ use light_river::stream::iter_csv::IterCsv;
 use ndarray::Array1;
 use num::ToPrimitive;
 
-use std::fs::File;
+use std::fmt::format;
+use std::fs::{File, OpenOptions};
 use std::time::Instant;
 
 /// Get list of features of the dataset.
@@ -54,15 +56,36 @@ fn train_forest(
     let transactions = Synthetic::load_data();
 
     const CACHE_SORT: bool = true;
-    const CACHE_FREQ: usize = 25_000;
+    const CACHE_FREQ: usize = 1_000;
     if CACHE_SORT {
         println!("Cache sort. Sorting every {} iterations.", CACHE_FREQ);
     } else {
         println!("No cache sort");
     }
 
-    let train_instant = Instant::now();
-    let mut cache_time = 0.0;
+    std::fs::File::create("run_synthetic_output_train_times.csv").unwrap();
+    let mut wtr_train_times = Writer::from_writer(
+        OpenOptions::new()
+            .append(true)
+            .open("run_synthetic_output_train_times.csv")
+            .unwrap(),
+    );
+    std::fs::File::create("run_synthetic_output_tree_size.csv").unwrap();
+    let mut wtr_tree_size = Writer::from_writer(
+        OpenOptions::new()
+            .append(true)
+            .open("run_synthetic_output_tree_size.csv")
+            .unwrap(),
+    );
+    std::fs::File::create("run_synthetic_output_depth.csv").unwrap();
+    let mut wtr_depth = Writer::from_writer(
+        OpenOptions::new()
+            .append(true)
+            .open("run_synthetic_output_depth.csv")
+            .unwrap(),
+    );
+
+    let mut train_time_tot = 0.0;
     for (idx, transaction) in transactions.enumerate() {
         let data = transaction.unwrap();
 
@@ -78,32 +101,54 @@ fn train_forest(
 
         // println!("=M=1 x {}", x);
 
+        let mut train_time_str = String::new();
+        let score_instant: Instant = Instant::now();
+
         // Skip first sample since tree has still no node
         if idx != 0 {
             let score = mf.score(&x, y);
             score_total += score;
-            println!(
-                "Accuracy: {} / {} = {}",
-                score_total,
-                dataset_size - 1,
-                score_total / idx.to_f32().unwrap()
-            );
+            // println!(
+            //     "Accuracy: {} / {} = {}",
+            //     score_total,
+            //     dataset_size - 1,
+            //     score_total / idx.to_f32().unwrap()
+            // );
         }
+        let score_time = score_instant.elapsed().as_nanos();
 
         // println!("=M=1 partial_fit {x}");
+        let fit_instant = Instant::now();
         mf.partial_fit(&x, y);
+        let fit_time = fit_instant.elapsed().as_nanos();
+
+        train_time_str.push_str(format!("{},{}", score_time, fit_time).as_str());
+        train_time_tot += score_instant.elapsed().as_micros().to_f32().unwrap() / 1_000f32;
 
         if CACHE_SORT & (idx % CACHE_FREQ == 0) {
-            let cache_instant = Instant::now();
+            let cache_time = Instant::now();
             mf.cache_sort();
-            cache_time += cache_instant.elapsed().as_micros().to_f32().unwrap() / 1000f32;
+            // train_time_str.push_str(format!(" CACHING time: {}", cache_time.elapsed().as_nanos()).as_str());
             // println!("Sorted at inedex: {}", idx);
-        }
-    }
-    let train_time = train_instant.elapsed().as_micros().to_f32().unwrap() / 1000f32;
-    let discounted_time = train_time - cache_time;
 
-    println!("Discounted time (total-sorting): {}ms", discounted_time);
+            // Mesure tree size
+            wtr_tree_size
+                .write_record(&[mf.get_forest_size().to_string()])
+                .unwrap();
+            wtr_tree_size.flush().unwrap();
+
+            // Mesure depths
+            let (optim, _, max) = mf.get_forest_depth();
+            // Excluding avg. Not useful for now.
+            let depth_str = format!("{},{}", optim, max);
+            wtr_depth.write_record(&[depth_str]).unwrap();
+            wtr_depth.flush().unwrap();
+        }
+        wtr_train_times.write_record(&[train_time_str]).unwrap();
+        wtr_train_times.flush().unwrap();
+    }
+
+    println!("Score+fit time (excuding cache sort): {}ms", train_time_tot);
 
     // Accuracy does not include first sample.
     println!(
