@@ -1,6 +1,16 @@
 repos:
--   repo: https://github.com/doublify/pre-commit-rust
+  - repo: https://github.com/doublify/pre-commit-rust
     rev: v1.0
     hooks:
-    -   id: fmt
-    -   id: cargo-check
+      - id: fmt
+      - id: cargo-check
+
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.7.1
+    hooks:
+      - id: nbstripout
+        name: nbstripout
+        entry: nbstripout
+        language: system
+        files: \.ipynb$
+        types: [jupyter]
