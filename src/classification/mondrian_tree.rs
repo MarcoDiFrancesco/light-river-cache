@@ -19,6 +19,9 @@ pub struct MondrianTreeClassifier<F: FType> {
     rng: ThreadRng,
     nodes: Vec<Node<F>>,
     root: Option<usize>,
+    sorted_c: usize,
+    unsorted_c: usize,
+    previous_node: Option<usize>,
 }
 
 impl<F: FType + fmt::Display> fmt::Display for MondrianTreeClassifier<F> {
@@ -106,6 +109,9 @@ impl<F: FType> MondrianTreeClassifier<F> {
             rng: rand::thread_rng(),
             nodes: Vec::with_capacity(MAX_NODES),
             root: None,
+            sorted_c: 0,
+            unsorted_c: 0,
+            previous_node: None,
         }
     }
 
@@ -633,13 +639,23 @@ impl<F: FType> MondrianTreeClassifier<F> {
 
     /// Note: In Nel215 codebase should work on multiple records. Here it only works
     /// as public interface for predict().
-    pub fn predict_proba(&self, x: &Array1<F>) -> Array1<F> {
-        // println!("predict_proba() - tree size: {}", self.nodes.len());
+    pub fn predict_proba(&mut self, x: &Array1<F>) -> Array1<F> {
         // self.test_tree();
+        self.previous_node = None;
         self.predict(x, self.root.unwrap(), F::one())
     }
 
-    fn predict(&self, x: &Array1<F>, node_idx: usize, p_not_separated_yet: F) -> Array1<F> {
+    fn predict(&mut self, x: &Array1<F>, node_idx: usize, p_not_separated_yet: F) -> Array1<F> {
+        // Sorted count
+        if self.previous_node.is_some() {
+            if self.previous_node.unwrap() == node_idx - 1 {
+                self.sorted_c += 1;
+            } else {
+                self.unsorted_c += 1;
+            }
+        }
+        self.previous_node = Some(node_idx);
+
         let node = &self.nodes[node_idx];
         // Probability 'p' of the box not splitting.
         //     eta (box dist): larger distance, more prob of splitting
@@ -730,6 +746,13 @@ impl<F: FType> MondrianTreeClassifier<F> {
 
         let max_depth = *depths.iter().max().unwrap_or(&0);
         (node_count, optim, avg_depth, avg_w_depth, max_depth as f32)
+    }
+
+    pub fn get_sorted_count(&mut self) -> (usize, usize) {
+        let res = (self.sorted_c, self.unsorted_c);
+        self.sorted_c = 0;
+        self.unsorted_c = 0;
+        res
     }
 
     // //////////////////////////////////////////////////////////

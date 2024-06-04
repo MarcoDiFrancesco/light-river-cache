@@ -24,9 +24,9 @@ impl<F: FType> MondrianForestClassifier<F> {
         }
     }
 
-    fn predict_proba(&self, x: &Array1<F>) -> Array1<F> {
+    fn predict_proba(&mut self, x: &Array1<F>) -> Array1<F> {
         let mut tot_probs = Array1::<F>::zeros(self.n_labels);
-        for tree in &self.trees {
+        for tree in &mut self.trees {
             let probs = tree.predict_proba(x);
             debug_assert!(
                 !probs.iter().any(|&x| x.is_nan()),
@@ -82,10 +82,24 @@ impl<F: FType> MondrianForestClassifier<F> {
         }
         // Average over #trees
         let node_n_avg = node_counts.iter().sum::<f32>() / node_counts.len() as f32;
-        let opt: f32 = optimals.iter().sum::<f32>() / optimals.len() as f32;
-        let avg: f32 = avgs.iter().sum::<f32>() / avgs.len() as f32;
-        let avg_w: f32 = avgs_w.iter().sum::<f32>() / avgs_w.len() as f32;
-        let max: f32 = maxs.iter().sum::<f32>() / maxs.len() as f32;
+        let opt = optimals.iter().sum::<f32>() / optimals.len() as f32;
+        let avg = avgs.iter().sum::<f32>() / avgs.len() as f32;
+        let avg_w = avgs_w.iter().sum::<f32>() / avgs_w.len() as f32;
+        let max = maxs.iter().sum::<f32>() / maxs.len() as f32;
         (node_n_avg, opt, avg, avg_w, max)
+    }
+
+    pub fn get_sorted_count(&mut self) -> (f32, f32) {
+        let mut sorted_counts = vec![];
+        let mut unsorted_counts = vec![];
+        for t in &mut self.trees {
+            let (sorted_c, unsorted_c) = t.get_sorted_count();
+            sorted_counts.push(sorted_c);
+            unsorted_counts.push(unsorted_c);
+        }
+        let count_tot = sorted_counts.iter().sum::<usize>() + unsorted_counts.iter().sum::<usize>();
+        let sorted_avg = sorted_counts.iter().sum::<usize>() as f32 / count_tot as f32;
+        let unsorted_avg = unsorted_counts.iter().sum::<usize>() as f32 / count_tot as f32;
+        (sorted_avg, unsorted_avg)
     }
 }

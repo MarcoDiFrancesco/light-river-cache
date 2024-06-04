@@ -55,7 +55,7 @@ fn train_forest(
     let mut score_total = 0.0;
     let transactions = Synthetic::load_data();
 
-    const CACHE_SORT: bool = true;
+    const CACHE_SORT: bool = false;
     const CACHE_FREQ: usize = 1_000;
     if CACHE_SORT {
         println!("Cache sort. Sorting every {} iterations.", CACHE_FREQ);
@@ -90,6 +90,16 @@ fn train_forest(
             OpenOptions::new()
                 .append(true)
                 .open("run_synthetic_output_depth.csv")
+                .unwrap(),
+        );
+
+    std::fs::File::create("run_synthetic_output_sorted_count.csv").unwrap();
+    let mut wtr_sorted_count = WriterBuilder::new()
+        .quote_style(csv::QuoteStyle::Never)
+        .from_writer(
+            OpenOptions::new()
+                .append(true)
+                .open("run_synthetic_output_sorted_count.csv")
                 .unwrap(),
         );
 
@@ -134,11 +144,13 @@ fn train_forest(
             .push_str(format!("{},{},{}", score_time, fit_time, score_time + fit_time).as_str());
         train_time_tot += score_instant.elapsed().as_micros().to_f32().unwrap() / 1_000f32;
 
-        if CACHE_SORT & (idx % CACHE_FREQ == 0) {
-            let cache_time = Instant::now();
-            mf.cache_sort();
-            // train_time_str.push_str(format!(" CACHING time: {}", cache_time.elapsed().as_nanos()).as_str());
-            // println!("Sorted at inedex: {}", idx);
+        if (idx % CACHE_FREQ == 0) {
+            if CACHE_SORT {
+                let cache_time = Instant::now();
+                mf.cache_sort();
+                // train_time_str.push_str(format!(" CACHING time: {}", cache_time.elapsed().as_nanos()).as_str());
+                // println!("Sorted at inedex: {}", idx);
+            }
 
             // Mesure tree size
             wtr_tree_size
@@ -148,10 +160,15 @@ fn train_forest(
 
             // Mesure depths
             let (node_n, optim, avg, avg_w, max) = mf.get_forest_depth();
-            // Excluding avg. Not useful for now.
             let depth_str = format!("{},{},{},{},{}", node_n, optim, avg, avg_w, max);
             wtr_depth.write_record(&[depth_str]).unwrap();
             wtr_depth.flush().unwrap();
+
+            // Count ordered nodes
+            let (sorted_count, unsorted_count) = mf.get_sorted_count();
+            let sorted_count_str = format!("{},{}", sorted_count, unsorted_count);
+            wtr_sorted_count.write_record(&[sorted_count_str]).unwrap();
+            wtr_sorted_count.flush().unwrap();
         }
         wtr_train_times.write_record(&[train_time_str]).unwrap();
         wtr_train_times.flush().unwrap();
