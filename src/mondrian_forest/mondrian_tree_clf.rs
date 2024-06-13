@@ -1,9 +1,9 @@
-use crate::classification::alias::FType;
-use crate::classification::mondrian_node::{Node, Stats};
-use ndarray::Array1;
-use num::Float;
+use crate::common::{Classifier, ClfTarget, RegTarget, Regressor};
+use crate::mondrian_forest::alias::FType;
+use crate::mondrian_forest::mondrian_node::{NodeClassifier, NodeRegressor};
+use ndarray::{Array1, Array2};
 use num::ToPrimitive;
-use rand::distributions::weighted;
+use num::{Float, FromPrimitive};
 use rand::prelude::*;
 use rand_distr::{Distribution, Exp};
 use std::collections::HashSet;
@@ -17,7 +17,7 @@ pub struct MondrianTreeClassifier<F: FType> {
     n_features: usize,
     n_labels: usize,
     rng: ThreadRng,
-    nodes: Vec<Node<F>>,
+    nodes: Vec<NodeClassifier<F>>,
     root: Option<usize>,
     sorted_c: usize,
     unsorted_c: usize,
@@ -68,9 +68,9 @@ impl<F: FType + fmt::Display> MondrianTreeClassifier<F> {
                 node.range_max.to_vec(),
                 node.threshold,
                 feature,
-                node.stats.counts,
-                // node.stats.sums,
-                // node.stats.sq_sums,
+                node.counts,
+                // node.sums,
+                // node.sq_sums,
                 // node.is_leaf,
             )?;
             // writeln!(
@@ -101,6 +101,26 @@ impl<F: FType + fmt::Display> MondrianTreeClassifier<F> {
     }
 }
 
+impl<F: FType> Classifier<F> for MondrianTreeClassifier<F> {
+    fn learn_one(&mut self, x: &Array1<F>, y: &ClfTarget) {
+        self.root = match self.root {
+            None => Some(self.create_leaf(x, y, None, F::zero())),
+            Some(root_idx) => Some(self.go_downwards(root_idx, x, y)),
+        };
+        // println!("partial_fit() tree post {}===========", self);
+    }
+
+    fn predict_proba(&mut self, x: &Array1<F>) -> Array1<F> {
+        // println!("predict_proba() - tree size: {}", self.nodes.len());
+        // self.test_tree();
+        self.predict(x, self.root.unwrap(), F::one())
+    }
+
+    fn predict_one(&mut self, x: &Array1<F>, y: &ClfTarget) -> F {
+        unimplemented!("predict_proba is only implemented in MondrianForest for now. In the future implement it.")
+    }
+}
+
 impl<F: FType> MondrianTreeClassifier<F> {
     pub fn new(n_features: usize, n_labels: usize) -> Self {
         MondrianTreeClassifier::<F> {
@@ -115,10 +135,16 @@ impl<F: FType> MondrianTreeClassifier<F> {
         }
     }
 
-    fn create_leaf(&mut self, x: &Array1<F>, y: usize, parent: Option<usize>, time: F) -> usize {
-        let mut node = Node::<F> {
+    fn create_leaf(
+        &mut self,
+        x: &Array1<F>,
+        y: &ClfTarget,
+        parent: Option<usize>,
+        time: F,
+    ) -> usize {
+        let mut node = NodeClassifier::<F> {
             parent,
-            time, // F::from(1e9).unwrap(), // Very large value
+            time,
             is_leaf: true,
             range_min: x.clone(),
             range_max: x.clone(),
@@ -126,19 +152,23 @@ impl<F: FType> MondrianTreeClassifier<F> {
             threshold: F::infinity(),
             left: None,
             right: None,
-            stats: Stats::new(self.n_labels, self.n_features),
+            sums: Array2::zeros((self.n_labels, self.n_features)),
+            sq_sums: Array2::zeros((self.n_labels, self.n_features)),
+            counts: Array1::zeros(self.n_labels),
+            n_labels: self.n_labels,
+            n_features: self.n_features,
         };
 
-        node.update_leaf(x, y);
+        node.add(x, y);
         self.nodes.push(node);
         let node_idx = self.nodes.len() - 1;
         node_idx
     }
 
     fn create_empty_node(&mut self, parent: Option<usize>, time: F) -> usize {
-        let node = Node::<F> {
+        let node = NodeClassifier::<F> {
             parent,
-            time, // F::from(1e9).unwrap(), // Very large value
+            time,
             is_leaf: true,
             range_min: Array1::from_elem(self.n_features, F::infinity()),
             range_max: Array1::from_elem(self.n_features, -F::infinity()),
@@ -146,7 +176,11 @@ impl<F: FType> MondrianTreeClassifier<F> {
             threshold: F::infinity(),
             left: None,
             right: None,
-            stats: Stats::new(self.n_labels, self.n_features),
+            sums: Array2::zeros((self.n_labels, self.n_features)),
+            sq_sums: Array2::zeros((self.n_labels, self.n_features)),
+            counts: Array1::zeros(self.n_labels),
+            n_labels: self.n_labels,
+            n_features: self.n_features,
         };
         self.nodes.push(node);
         let node_idx = self.nodes.len() - 1;
@@ -184,8 +218,8 @@ impl<F: FType> MondrianTreeClassifier<F> {
         //        ├─Node: min=[0, 0], max=[2, 2]
         //        └─Node: min=[1, 1], max=[3, 3] <----- Overlap in area [1, 1] to [2, 2]
         fn siblings_share_area<F: Float + std::cmp::PartialOrd>(
-            left: &Node<F>,
-            right: &Node<F>,
+            left: &NodeClassifier<F>,
+            right: &NodeClassifier<F>,
         ) -> bool {
             point_inside_area(&left.range_min, &right.range_min, &right.range_max)
                 || point_inside_area(&left.range_max, &right.range_min, &right.range_max)
@@ -206,8 +240,8 @@ impl<F: FType> MondrianTreeClassifier<F> {
         /// It must be checked in the future.
         /// (An example: https://i.imgur.com/Yk4ZeuZ.png)
         fn child_inside_parent<F: Float + std::cmp::PartialOrd>(
-            parent: &Node<F>,
-            child: &Node<F>,
+            parent: &NodeClassifier<F>,
+            child: &NodeClassifier<F>,
         ) -> bool {
             // Skip if child is not initialized
             if child.range_min.iter().any(|&x| x.is_infinite()) {
@@ -228,8 +262,8 @@ impl<F: FType> MondrianTreeClassifier<F> {
         ///        ├─Node: min=[0, 0], max=[1, 1], thrs=inf, f=_ <----- Threshold (0.5) cuts child
         ///        └─Node: min=[2, 2], max=[3, 3], thrs=inf, f=_
         fn threshold_cuts_child<F: Float + std::cmp::PartialOrd>(
-            parent: &Node<F>,
-            child: &Node<F>,
+            parent: &NodeClassifier<F>,
+            child: &NodeClassifier<F>,
         ) -> bool {
             // Skip if child is not initialized
             if child.range_min.iter().any(|&x| x.is_infinite()) {
@@ -247,9 +281,9 @@ impl<F: FType> MondrianTreeClassifier<F> {
         ///        ├─Node: min=[0, 0], max=[0, 0], thrs=inf, f=_
         ///        └─Node: min=[1, 1], max=[1, 1], thrs=inf, f=_ <----- Right child on found in the left of the threshold
         fn children_on_correct_side<F: Float + std::cmp::PartialOrd>(
-            parent: &Node<F>,
-            left: &Node<F>,
-            right: &Node<F>,
+            parent: &NodeClassifier<F>,
+            left: &NodeClassifier<F>,
+            right: &NodeClassifier<F>,
         ) -> bool {
             let thrs = parent.threshold;
             let f = parent.feature;
@@ -293,11 +327,28 @@ impl<F: FType> MondrianTreeClassifier<F> {
         /// │ │ ├─ Node: counts=[0, 0, 0]
         /// │ ├─ Node: counts=[0, 1, 0]
         fn parent_has_sibling_counts<F: Float + std::cmp::PartialOrd>(
-            parent: &Node<F>,
-            left: &Node<F>,
-            right: &Node<F>,
+            parent: &NodeClassifier<F>,
+            left: &NodeClassifier<F>,
+            right: &NodeClassifier<F>,
         ) -> bool {
-            (&left.stats.counts + &right.stats.counts) == &parent.stats.counts
+            (&left.counts + &right.counts) == &parent.counts
+        }
+
+        /// Checking if parent (with children) does not have infinite values.
+        ///
+        /// e.g. Tree
+        ///      └─Node: min=[0.2, 0.1], max=[2.6, 1.6]
+        ///        ├─Node: min=[inf, inf], max=[-inf, -inf] <----- This is not possible
+        ///        │ ├─Node: min=[0.3, 0.2], max=[0.3, 0.2]
+        ///        │ └─Node: min=[0.7, 0.6], max=[0.8, 0.9]
+        ///        └─Node: min=[2.6, 1.6], max=[2.6, 1.6]
+        fn parent_has_finite_values<F: Float + std::cmp::PartialOrd>(
+            parent: &NodeClassifier<F>,
+            left: &NodeClassifier<F>,
+            right: &NodeClassifier<F>,
+        ) -> bool {
+            parent.range_min.iter().all(|&x| x.is_finite())
+                && parent.range_max.iter().all(|&x| x.is_finite())
         }
 
         for node_idx in 0..self.nodes.len() {
@@ -320,24 +371,24 @@ impl<F: FType> MondrianTreeClassifier<F> {
                 );
 
                 // Child inside parent
-                // debug_assert!(
-                //     child_inside_parent(node, left),
-                //     "Left child outiside parent area. \nParent {}: {}, \nChild {}: {}\nTree{}",
-                //     node_idx,
-                //     node,
-                //     left_idx,
-                //     left,
-                //     self
-                // );
-                // debug_assert!(
-                //     child_inside_parent(node, right),
-                //     "Right child outiside parent area. \nParent {}: {}, \nChild {}: {}\nTree{}",
-                //     node_idx,
-                //     node,
-                //     right_idx,
-                //     right,
-                //     self
-                // );
+                debug_assert!(
+                    child_inside_parent(node, left),
+                    "Left child outiside parent area. \nParent {}: {}, \nChild {}: {}\nTree{}",
+                    node_idx,
+                    node,
+                    left_idx,
+                    left,
+                    self
+                );
+                debug_assert!(
+                    child_inside_parent(node, right),
+                    "Right child outiside parent area. \nParent {}: {}, \nChild {}: {}\nTree{}",
+                    node_idx,
+                    node,
+                    right_idx,
+                    right,
+                    self
+                );
 
                 // Threshold cuts child
                 debug_assert!(
@@ -378,6 +429,15 @@ impl<F: FType> MondrianTreeClassifier<F> {
                 //     node,
                 //     self
                 // );
+
+                // Parent does not have infinite values
+                debug_assert!(
+                    parent_has_finite_values(node, left, right),
+                    "Parent should not have infinite values. \nNode {}: {}\nTree{}",
+                    node_idx,
+                    node,
+                    self
+                );
             }
         }
 
@@ -399,7 +459,7 @@ impl<F: FType> MondrianTreeClassifier<F> {
         time: F,
         exp_sample: F,
         node_idx: usize,
-        y: usize,
+        y: &ClfTarget,
         extensions_sum: F,
     ) -> F {
         if self.nodes[node_idx].is_dirac(y) {
@@ -445,7 +505,7 @@ impl<F: FType> MondrianTreeClassifier<F> {
         F::zero()
     }
 
-    fn go_downwards(&mut self, node_idx: usize, x: &Array1<F>, y: usize) -> usize {
+    fn go_downwards(&mut self, node_idx: usize, x: &Array1<F>, y: &ClfTarget) -> usize {
         let time = self.nodes[node_idx].time;
         let node_range_min = &self.nodes[node_idx].range_min;
         let node_range_max = &self.nodes[node_idx].range_max;
@@ -478,6 +538,7 @@ impl<F: FType> MondrianTreeClassifier<F> {
                 let e_sample = F::from_f32(self.rng.gen::<f32>()).unwrap() * extensions.sum();
                 // DEBUG: shadowing with expected value
                 let e_sample = F::from_f32(0.5).unwrap() * extensions.sum();
+                // println!("go_downwards() - cumsum: {cumsum}, e_sample: {e_sample}");
                 cumsum.iter().position(|&val| val > e_sample).unwrap()
             };
 
@@ -530,7 +591,7 @@ impl<F: FType> MondrianTreeClassifier<F> {
             } else {
                 // Add node along the path.
                 // println!("go_downwards() - split_time > 0 (not leaf)");
-                let parent_node = Node {
+                let parent_node = NodeClassifier {
                     parent: self.nodes[node_idx].parent,
                     time: self.nodes[node_idx].time,
                     is_leaf: false,
@@ -540,7 +601,11 @@ impl<F: FType> MondrianTreeClassifier<F> {
                     threshold,
                     left: None,
                     right: None,
-                    stats: Stats::new(self.n_labels, self.n_features),
+                    sums: Array2::zeros((self.n_labels, self.n_features)),
+                    sq_sums: Array2::zeros((self.n_labels, self.n_features)),
+                    counts: Array1::zeros(self.n_labels),
+                    n_labels: self.n_labels,
+                    n_features: self.n_features,
                 };
                 self.nodes.push(parent_node);
                 let parent_idx = self.nodes.len() - 1;
@@ -561,19 +626,24 @@ impl<F: FType> MondrianTreeClassifier<F> {
                     self.nodes[parent_idx].left = Some(sibling_idx);
                     self.nodes[parent_idx].right = Some(node_idx);
                 }
-                self.nodes[parent_idx].stats = self.nodes[node_idx].stats.clone();
+                // self.nodes[parent_idx].stats = self.nodes[node_idx].stats.clone();
+                let node = &self.nodes[node_idx].clone();
+                self.nodes[parent_idx].copy_stats_from(node);
                 self.nodes[node_idx].parent = Some(parent_idx);
                 self.nodes[node_idx].time = split_time;
 
-                // This 'if' is required to not break 'child_inside_parent' test. Even though
-                // it's probably correct I'll comment it until we get a 1:1 with River.
-                // if self.nodes[node_idx].is_leaf {
-                self.nodes[node_idx].range_min = Array1::from_elem(self.n_features, F::infinity());
-                self.nodes[node_idx].range_max = Array1::from_elem(self.n_features, -F::infinity());
-                self.nodes[node_idx].stats = Stats::new(self.n_labels, self.n_features);
-                // }
+                if self.nodes[node_idx].is_leaf {
+                    self.nodes[node_idx].range_min =
+                        Array1::from_elem(self.n_features, F::infinity());
+                    self.nodes[node_idx].range_max =
+                        Array1::from_elem(self.n_features, -F::infinity());
+
+                    // Resetting stats
+                    // self.nodes[node_idx].stats = Stats::new(self.n_labels, self.n_features);
+                    self.nodes[node_idx].reset_stats();
+                }
                 // self.update_downwards(parent_idx);
-                self.nodes[parent_idx].update_leaf(x, y);
+                self.nodes[parent_idx].add(x, y);
                 return parent_idx;
             }
         } else {
@@ -585,7 +655,7 @@ impl<F: FType> MondrianTreeClassifier<F> {
 
             if node.is_leaf {
                 // println!("go_downwards() - split_time < 0 (is leaf)");
-                node.update_leaf(x, y);
+                node.add(x, y);
             } else {
                 // println!("go_downwards() - split_time < 0 (not leaf)");
                 if x[node.feature] <= node.threshold {
@@ -600,7 +670,7 @@ impl<F: FType> MondrianTreeClassifier<F> {
                     node.right = node_right_new;
                 };
                 // self.update_downwards(node_idx);
-                self.nodes[node_idx].update_leaf(x, y);
+                self.nodes[node_idx].add(x, y);
             }
             return node_idx;
         }
@@ -614,35 +684,9 @@ impl<F: FType> MondrianTreeClassifier<F> {
         // println!("update_downwards() - node_idx: {}", node_idx);
 
         let node = &self.nodes[node_idx];
-        let left_s = &self.nodes[node.left.unwrap()].stats;
-        let right_s = &self.nodes[node.right.unwrap()].stats;
-        let merge_s = node.get_stats_from_children(left_s, right_s);
-        let node = &mut self.nodes[node_idx];
-        node.stats = merge_s;
-    }
-
-    /// Note: In Nel215 codebase should work on multiple records, here it's
-    /// working only on one.
-    ///
-    /// Function in River/LightRiver: "learn_one()"
-    pub fn partial_fit(&mut self, x: &Array1<F>, y: usize) {
-        self.root = match self.root {
-            None => Some(self.create_leaf(x, y, None, F::zero())),
-            Some(root_idx) => Some(self.go_downwards(root_idx, x, y)),
-        };
-        // println!("partial_fit() tree post {}===========", self);
-    }
-
-    fn fit(&self) {
-        unimplemented!("Make the program first work with 'partial_fit', then implement this")
-    }
-
-    /// Note: In Nel215 codebase should work on multiple records. Here it only works
-    /// as public interface for predict().
-    pub fn predict_proba(&mut self, x: &Array1<F>) -> Array1<F> {
-        // self.test_tree();
-        self.previous_node = None;
-        self.predict(x, self.root.unwrap(), F::one())
+        let left = self.nodes[node.left.unwrap()].clone();
+        let right = self.nodes[node.right.unwrap()].clone();
+        self.nodes[node_idx].update_internal(left.clone(), right.clone());
     }
 
     fn predict(&mut self, x: &Array1<F>, node_idx: usize, p_not_separated_yet: F) -> Array1<F> {
@@ -670,11 +714,11 @@ impl<F: FType> MondrianTreeClassifier<F> {
         debug_assert!(!p.is_nan(), "Found probability of splitting NaN. This is probably because range_max and range_min are [inf, inf].");
 
         // Generate a result for the current node using its statistics.
-        let res = node.stats.create_result(x, p_not_separated_yet * p);
+        let res = node.create_result(x, p_not_separated_yet * p);
 
         let w = p_not_separated_yet * (F::one() - p);
         if node.is_leaf {
-            let res2 = node.stats.create_result(x, w);
+            let res2 = node.create_result(x, w);
             return res + res2;
         } else {
             let child_idx = if x[node.feature] <= node.threshold {
@@ -711,8 +755,8 @@ impl<F: FType> MondrianTreeClassifier<F> {
 
         // Function to recursively compute the depth of a node
         fn compute_depth<F: FType>(
-            nodes: &Vec<Node<F>>,
-            root: &Node<F>,
+            nodes: &Vec<NodeClassifier<F>>,
+            root: &NodeClassifier<F>,
             node_idx: Option<usize>,
             current_depth: usize,
             depths: &mut Vec<usize>,
@@ -722,7 +766,7 @@ impl<F: FType> MondrianTreeClassifier<F> {
                 let node = &nodes[idx];
                 if node.is_leaf {
                     depths.push(current_depth);
-                    let weight = node.stats.counts.sum() as f32 / root.stats.counts.sum() as f32;
+                    let weight = node.counts.sum() as f32 / root.counts.sum() as f32;
                     nodes_w.push(current_depth as f32 * weight);
                 }
                 compute_depth(nodes, root, node.left, current_depth + 1, depths, nodes_w);
@@ -801,8 +845,8 @@ impl<F: FType> MondrianTreeClassifier<F> {
         while !node.is_leaf {
             let idx_l = node.left.unwrap();
             let idx_r = node.right.unwrap();
-            let count_l = self.nodes[idx_l].stats.counts.sum();
-            let count_r = self.nodes[idx_r].stats.counts.sum();
+            let count_l = self.nodes[idx_l].counts.sum();
+            let count_r = self.nodes[idx_r].counts.sum();
             if count_l >= count_r {
                 // Add right to candidates
                 candidates.push((idx_r, count_r));
@@ -838,7 +882,7 @@ impl<F: FType> MondrianTreeClassifier<F> {
                 .nodes
                 .iter()
                 .enumerate()
-                .map(|(i, n)| (i, n.stats.counts.sum()))
+                .map(|(i, n)| (i, n.counts.sum()))
                 .collect();
             nodes_probs.sort_by_key(|k| k.1);
             nodes_probs.reverse();

@@ -5,14 +5,14 @@ use std::path::Path;
 
 use super::utils;
 
-/// Scikit learn synthetic dataset for classification.
+/// Scikit learn synthetic dataset for regression.
 ///
-/// Genearted using 'make_classification' API.
-pub struct Synthetic;
-impl Synthetic {
+/// Genearted using 'make_regression' API.
+pub struct SyntheticRegression;
+impl SyntheticRegression {
     pub fn load_data() -> IterCsv<f32, File> {
-        let url = "https://marcodifrancesco.com/assets/img/LightRiver/syntetic_dataset.csv";
-        let file_name = "syntetic_dataset_v2.2.csv";
+        let url = "https://marcodifrancesco.com/assets/img/LightRiver/syntetic_reg_dataset.csv";
+        let file_name = "syntetic_reg_dataset_v2.2.csv";
         if !Path::new(file_name).exists() {
             utils::download_csv_file(url, file_name);
         }
