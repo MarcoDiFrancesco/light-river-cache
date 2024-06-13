@@ -37,7 +37,7 @@ fn train_forest(
     let mut err_total = 0.0;
     let transactions = SyntheticRegression::load_data();
 
-    const CACHE_SORT: bool = false;
+    const CACHE_SORT: bool = true;
     const CACHE_FREQ: usize = 1_000;
     if CACHE_SORT {
         println!("Cache sort. Sorting every {} iterations.", CACHE_FREQ);
@@ -46,7 +46,7 @@ fn train_forest(
     }
 
     let task = "reg";
-    let is_opt = if CACHE_SORT { "is-opt" } else { "no-opt" };
+    let is_opt = if CACHE_SORT { "opt" } else { "notopt" };
 
     let path_train_times = format!("res_{task}_{is_opt}_times.csv");
     std::fs::File::create(&path_train_times).unwrap();
@@ -167,6 +167,8 @@ fn main() {
 
     let transactions_f = SyntheticRegression::load_data();
     let features = get_features(transactions_f);
+
+    println!("features: {features:?}");
 
     let mut mf: MondrianForestRegressor<f32> =
         MondrianForestRegressor::new(n_trees, features.len());

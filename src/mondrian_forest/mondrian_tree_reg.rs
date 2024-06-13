@@ -649,7 +649,7 @@ impl<F: FType> MondrianTreeRegressor<F> {
 
     fn predict(&mut self, x: &Array1<F>, node_idx: usize, p_not_separated_yet: F) -> F {
         // Sorted count
-        if self.previous_node.is_some() {
+        if self.previous_node.is_some() && node_idx != 0 {
             if self.previous_node.unwrap() == node_idx - 1 {
                 self.sorted_c += 1;
             } else {
@@ -696,6 +696,10 @@ impl<F: FType> MondrianTreeRegressor<F> {
             None => F::from_f32(0.0).unwrap(),
         }
     }
+
+    // //////////////////////////////////////////////////////////
+    //  Caching
+    // //////////////////////////////////////////////////////////
 
     pub fn get_tree_size(&self) -> usize {
         self.nodes.len()
@@ -756,10 +760,6 @@ impl<F: FType> MondrianTreeRegressor<F> {
         self.unsorted_c = 0;
         res
     }
-
-    // //////////////////////////////////////////////////////////
-    //  Caching
-    // //////////////////////////////////////////////////////////
 
     /// Return 'index of candidate vector' of the candidate with highest count.
     ///

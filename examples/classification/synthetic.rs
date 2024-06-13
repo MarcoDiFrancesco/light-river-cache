@@ -61,7 +61,7 @@ fn train_forest(
     }
 
     let task = "clf";
-    let is_opt = if CACHE_SORT { "is-opt" } else { "no-opt" };
+    let is_opt = if CACHE_SORT { "opt" } else { "notopt" };
 
     let path_train_times = format!("res_{task}_{is_opt}_times.csv");
     std::fs::File::create(&path_train_times).unwrap();
@@ -195,7 +195,9 @@ fn main() {
 
     let transactions_c = Synthetic::load_data();
     let labels = get_labels(transactions_c, "label");
+
     println!("labels: {labels:?}, features: {features:?}");
+
     let mut mf: MondrianForestClassifier<f32> =
         MondrianForestClassifier::new(n_trees, features.len(), labels.len());
 
