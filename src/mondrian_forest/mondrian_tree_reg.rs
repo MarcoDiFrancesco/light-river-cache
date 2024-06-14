@@ -93,6 +93,7 @@ impl<F: FType> Regressor<F> for MondrianTreeRegressor<F> {
 
     fn predict_one(&mut self, x: &Array1<F>, y: &RegTarget<F>) -> F {
         // self.test_tree();
+        self.previous_node = None;
         self.predict(x, self.root.unwrap(), F::one())
     }
 }

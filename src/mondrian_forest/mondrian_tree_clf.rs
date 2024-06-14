@@ -113,6 +113,7 @@ impl<F: FType> Classifier<F> for MondrianTreeClassifier<F> {
     fn predict_proba(&mut self, x: &Array1<F>) -> Array1<F> {
         // println!("predict_proba() - tree size: {}", self.nodes.len());
         // self.test_tree();
+        self.previous_node = None;
         self.predict(x, self.root.unwrap(), F::one())
     }
 
