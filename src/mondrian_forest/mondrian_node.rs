@@ -95,6 +95,7 @@ impl<F: FType> NodeClassifier<F> {
         // println!("      - y={y}, count={}, \nsums={}, \nsq_sums={}", self.counts, self.sums, self.sq_sums);
     }
 
+    // TODO: consider if removing "pub" since the function is not called outside.
     /// Return probabilities of sample 'x' belonging to each class.
     pub fn predict_proba(&self, x: &Array1<F>) -> Array1<F> {
         let mut probs = Array1::zeros(self.n_labels);

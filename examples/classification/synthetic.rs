@@ -52,7 +52,7 @@ fn train_forest(
     let mut score_total = 0.0;
     let transactions = Synthetic::load_data();
 
-    const CACHE_SORT: bool = false;
+    const CACHE_SORT: bool = true;
     const CACHE_FREQ: usize = 1_000;
     if CACHE_SORT {
         println!("Cache sort. Sorting every {} iterations.", CACHE_FREQ);
