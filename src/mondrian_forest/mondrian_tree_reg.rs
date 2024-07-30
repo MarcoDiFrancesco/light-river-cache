@@ -6,7 +6,7 @@ use num::ToPrimitive;
 use num::{Float, FromPrimitive};
 use rand::prelude::*;
 use rand_distr::{Distribution, Exp};
-use std::collections::HashSet;
+use std::collections::{BinaryHeap, HashSet};
 use std::fmt;
 use std::usize;
 
@@ -53,16 +53,17 @@ impl<F: FType + fmt::Display> MondrianTreeRegressor<F> {
             };
             writeln!(
                 f,
-                "{}{}Node {}: time={:.3}, min={:?}, max={:?}, thrs={:.2}, f={}, sums={}, counts={}",
+                // "{}{}Node {}: time={:.3}, min={:?}, max={:?}, thrs={:.2}, f={}, sums={}, counts={}",
+                "{}{}Node {}: f={}, counts={}",
                 prefix,
                 node_prefix,
                 idx,
-                node.time,
-                node.range_min.to_vec(),
-                node.range_max.to_vec(),
-                node.threshold,
+                // node.time,
+                // node.range_min.to_vec(),
+                // node.range_max.to_vec(),
+                // node.threshold,
                 feature,
-                node.sums,
+                // node.sums,
                 node.counts,
             )?;
 
@@ -699,7 +700,7 @@ impl<F: FType> MondrianTreeRegressor<F> {
     }
 
     // //////////////////////////////////////////////////////////
-    //  Caching
+    //  Caching count
     // //////////////////////////////////////////////////////////
 
     pub fn get_tree_size(&self) -> usize {
@@ -762,29 +763,15 @@ impl<F: FType> MondrianTreeRegressor<F> {
         res
     }
 
-    /// Return 'index of candidate vector' of the candidate with highest count.
-    ///
-    /// TODO: check if this function is useful. It looks like we are always
-    ///       returning index 0.
-    ///
-    /// e.g. get_node_highest_prob(candidates=[(11, 3), (1, 3), (9, 2)]) -> 0
-    fn get_node_highest_prob(&self, candidates: &Vec<(usize, usize)>) -> (usize, usize) {
-        let mut max_count = 0;
-        let mut max_idx = 0;
-        for (idx, (_, node_count)) in candidates.iter().enumerate() {
-            if node_count > &max_count {
-                max_count = *node_count;
-                max_idx = idx;
-            }
-        }
-        candidates[max_idx]
-    }
+    // //////////////////////////////////////////////////////////
+    //  Caching sort
+    // //////////////////////////////////////////////////////////
 
     /// Given a starting node index i find path with highest count.
     ///
     /// e.g. considering tree below
-    ///     get_node_chain(0, candidates) -> [(0, 10), (1, 7), (3, 5)]
-    ///     get_node_chain(2, candidates) -> [(2, 3), (5, 2)]
+    ///     get_node_chain(0, candidates) -> [(10, 0), (7, 1), (5, 3)]
+    ///     get_node_chain(2, candidates) -> [(3, 2), (2, 5)]
     ///
     /// ┌─ Node 0: count=10
     /// │  ├─ Node 1: count=7
@@ -796,10 +783,10 @@ impl<F: FType> MondrianTreeRegressor<F> {
     fn get_node_chain(
         &self,
         i: (usize, usize),
-        candidates: &mut Vec<(usize, usize)>,
+        candidates: &mut BinaryHeap<(usize, usize)>,
     ) -> Vec<(usize, usize)> {
         let mut set = vec![i];
-        let mut node = &self.nodes[i.0];
+        let mut node = &self.nodes[i.1];
         let mut i;
         while !node.is_leaf {
             let idx_l = node.left.unwrap();
@@ -807,15 +794,13 @@ impl<F: FType> MondrianTreeRegressor<F> {
             let count_l = self.nodes[idx_l].counts;
             let count_r = self.nodes[idx_r].counts;
             if count_l >= count_r {
-                // Add right to candidates
-                candidates.push((idx_r, count_r));
-                // Set i to left
+                candidates.push((count_r, idx_r));
+                i = (count_l, idx_l);
                 node = &self.nodes[idx_l];
-                i = (idx_l, count_l);
             } else {
-                candidates.push((idx_l, count_l));
+                candidates.push((count_l, idx_l));
+                i = (count_r, idx_r);
                 node = &self.nodes[idx_r];
-                i = (idx_r, count_r);
             };
             set.push(i);
         }
@@ -832,49 +817,41 @@ impl<F: FType> MondrianTreeRegressor<F> {
     /// │     ├─ Node 5: count=2
     /// │     └─ Node 6: count=1
     fn get_optimized_tree_order(&self) -> Vec<usize> {
-        // root: (node_idx, node_count)
+        // root: (node_count, node_idx)
         let root = {
             // Order node by count in reverse order.
-            // nodes_probs: [(node_idx, node_count)]
-            // Example tree in docstring: [(0, 10), (1, 7), (3, 5), ...]
+            // nodes_probs: [(node_count, node_idx)]
+            // Example tree in docstring: [(10, 0), (7, 1), (5, 3), ...]
             let mut nodes_probs: Vec<(usize, usize)> = self
                 .nodes
                 .iter()
                 .enumerate()
-                .map(|(i, n)| (i, n.counts))
+                .map(|(i, n)| (n.counts, i))
                 .collect();
-            nodes_probs.sort_by_key(|k| k.1);
+            nodes_probs.sort_by_key(|k| k.0);
             nodes_probs.reverse();
             nodes_probs[0]
         };
-        // A
+        // A: All nodes in optimized order
         let mut new_order: Vec<(usize, usize)> = vec![];
-        // C
-        let mut candidates = vec![root];
-        while !candidates.is_empty() {
-            let i = self.get_node_highest_prob(&candidates);
-            // Remove candidate
-            candidates.remove(candidates.iter().position(|x| *x == i).unwrap());
+        // C: Candidates
+        let mut candidates = BinaryHeap::new();
+        candidates.push(root);
+
+        while let Some(_) = candidates.peek() {
+            let i = candidates.pop().unwrap();
             // S
             let set = self.get_node_chain(i, &mut candidates);
             new_order.extend(&set);
-
-            // println!(
-            //     "set: {:?},\nnew_order: {:?}\ncandidates: {:?}\n",
-            //     set.to_vec(),
-            //     new_order.to_vec(),
-            //     candidates.to_vec(),
-            // );
         }
         assert!(new_order.len() == self.nodes.len());
-        // From [(0, 10), (1, 7), (3, 5), ...] to [0, 1, 3, ...]
-        new_order.iter().map(|(idx, _)| *idx).collect()
+        new_order.iter().map(|(_, idx)| *idx).collect()
     }
 
     /// Sort nodes in the tree by the likelihood of access. Arrange the nodes
     /// so that the most probable next node is positioned next in the vector.
     ///
-    /// Follows implementation by [1] algorithm 2 'Optimized native Tree'.
+    /// Follows implementation by [1] Algorithm 2 'Optimized native Tree'.
     ///
     /// [1] Chen et al. (2022). Efficient Realization of Decision Trees for Real-Time Inference.
     ///     ACM Transactions on Embedded Computing Systems, 21(6), 1–26. https://doi.org/10.1145/3508019

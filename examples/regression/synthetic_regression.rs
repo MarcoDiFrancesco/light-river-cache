@@ -38,7 +38,7 @@ fn train_forest(
     let transactions = SyntheticRegression::load_data();
 
     const CACHE_SORT: bool = false;
-    const CACHE_FREQ: usize = 1_000;
+    const CACHE_FREQ: usize = 250_000 - 2;
     if CACHE_SORT {
         println!("Cache sort. Sorting every {} iterations.", CACHE_FREQ);
     } else {
@@ -87,7 +87,22 @@ fn train_forest(
                 .unwrap(),
         );
 
+    let path_sort_time = format!("res_{task}_{is_opt}_sort_time.csv");
+    std::fs::File::create(&path_sort_time).unwrap();
+    let mut wtr_sort_time = WriterBuilder::new()
+        .quote_style(csv::QuoteStyle::Never)
+        .from_writer(
+            OpenOptions::new()
+                .append(true)
+                .open(&path_sort_time)
+                .unwrap(),
+        );
+
+    // Total train time
     let mut train_time_tot = 0.0;
+    // Cumulative time for 1.000 iters train+score, reset on cache sort
+    let mut score_fit_time_cum = 0;
+
     for (idx, transaction) in transactions.enumerate() {
         let data = transaction.unwrap();
 
@@ -119,31 +134,41 @@ fn train_forest(
             .push_str(format!("{},{},{}", score_time, fit_time, score_time + fit_time).as_str());
         train_time_tot += score_instant.elapsed().as_micros().to_f32().unwrap() / 1_000f32;
 
+        score_fit_time_cum += score_time + fit_time;
+
         if (idx % CACHE_FREQ == 0) {
+            let mut cache_time = 0;
             if CACHE_SORT {
-                let cache_time = Instant::now();
+                let cache_instant = Instant::now();
                 mf.cache_sort();
-                // train_time_str.push_str(format!(" CACHING time: {}", cache_time.elapsed().as_nanos()).as_str());
-                // println!("Sorted at inedex: {}", idx);
+                cache_time = cache_instant.elapsed().as_nanos();
             }
 
-            // Mesure tree size
+            // Mesure number of nodes in the tree
             wtr_tree_size
                 .write_record(&[mf.get_forest_size().to_string()])
                 .unwrap();
             wtr_tree_size.flush().unwrap();
 
-            // Mesure depths
+            // Mesure tree depths metrics: avg, max, etc.
             let (node_n, optim, avg, avg_w, max) = mf.get_forest_depth();
             let depth_str = format!("{},{},{},{},{}", node_n, optim, avg, avg_w, max);
             wtr_depth.write_record(&[depth_str]).unwrap();
             wtr_depth.flush().unwrap();
 
-            // Count ordered nodes
+            // Measure: Sorted nodes vs Unsorted nodes
             let (sorted_count, unsorted_count) = mf.get_sorted_count();
             let sorted_count_str = format!("{},{}", sorted_count, unsorted_count);
             wtr_sorted_count.write_record(&[sorted_count_str]).unwrap();
             wtr_sorted_count.flush().unwrap();
+
+            // Measure: Time taken to sort vs Time saved by sorting
+            let node_n = mf.get_forest_size();
+            let sort_time_str = format!("{},{},{},{}", node_n, idx, cache_time, score_fit_time_cum);
+            wtr_sort_time.write_record(&[sort_time_str]).unwrap();
+            wtr_sort_time.flush().unwrap();
+
+            score_fit_time_cum = 0;
         }
         wtr_train_times.write_record(&[train_time_str]).unwrap();
         wtr_train_times.flush().unwrap();
