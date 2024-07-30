@@ -32,8 +32,16 @@ name = "credit_card"
 path = "examples/anomaly_detection/credit_card.rs"
 
 [[example]]
+name = "genesis_demonstrator"
+path = "examples/classification/genesis_demonstrator.rs"
+
+[[example]]
 name = "keystroke"
 path = "examples/classification/keystroke.rs"
+
+[[example]]
+name = "machine_degradations"
+path = "examples/regression/machine_degradations.rs"
 
 [[example]]
 name = "synthetic"
