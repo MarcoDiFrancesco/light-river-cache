@@ -10,7 +10,7 @@ repos:
     hooks:
       - id: nbstripout
         name: nbstripout
-        entry: nbstripout
+        entry: .venv/bin/nbstripout
         language: system
         files: \.ipynb$
         types: [jupyter]
