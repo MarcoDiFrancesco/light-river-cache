@@ -89,7 +89,6 @@ impl<F: FType> Regressor<F> for MondrianTreeRegressor<F> {
             None => Some(self.create_leaf(x, y, None, F::zero())),
             Some(root_idx) => Some(self.go_downwards(root_idx, x, y)),
         };
-        // println!("learn_one() tree post {}===========", self);
     }
 
     fn predict_one(&mut self, x: &Array1<F>, y: &RegTarget<F>) -> F {
@@ -104,7 +103,7 @@ impl<F: FType> MondrianTreeRegressor<F> {
         MondrianTreeRegressor::<F> {
             n_features,
             rng: rand::thread_rng(),
-            nodes: vec![],
+            nodes: Vec::with_capacity(MAX_NODES),
             root: None,
             sorted_c: 0,
             unsorted_c: 0,
@@ -500,7 +499,6 @@ impl<F: FType> MondrianTreeRegressor<F> {
                 let e_sample = F::from_f32(self.rng.gen::<f32>()).unwrap() * extensions.sum();
                 // DEBUG: shadowing with expected value
                 let e_sample = F::from_f32(0.5).unwrap() * extensions.sum();
-                // println!("go_downwards() - split_time: {split_time}, cumsum: {cumsum}, e_sample: {e_sample}");
                 cumsum.iter().position(|&val| val > e_sample).unwrap()
             };
 
@@ -520,10 +518,6 @@ impl<F: FType> MondrianTreeRegressor<F> {
             let threshold: F = F::from_f32(self.rng.gen_range(lower_bound..upper_bound)).unwrap();
             // DEBUG: split in the middle
             let threshold = F::from_f32((lower_bound + upper_bound) / 2.0).unwrap();
-            // println!(
-            //     "Threshold: {threshold} - Lower: {}, Upper: {}",
-            //     lower_bound, upper_bound
-            // );
 
             let mut range_min = node_range_min.clone();
             let mut range_max = node_range_max.clone();
@@ -675,7 +669,6 @@ impl<F: FType> MondrianTreeRegressor<F> {
 
         // Generate a result for the current node using its statistics.
         let res = node.create_result(x, p_not_separated_yet * p);
-        // println!("predict() - node={node_idx}, res={res}");
         let w = p_not_separated_yet * (F::one() - p);
         if node.is_leaf {
             let res2 = node.create_result(x, w);

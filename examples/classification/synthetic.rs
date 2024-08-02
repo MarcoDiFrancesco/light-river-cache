@@ -52,8 +52,8 @@ fn train_forest(
     let mut score_total = 0.0;
     let transactions = Synthetic::load_data();
 
-    const CACHE_SORT: bool = true;
-    const CACHE_FREQ: usize = 1_000;
+    const CACHE_SORT: bool = false;
+    const CACHE_FREQ: usize = 100_000;
     if CACHE_SORT {
         println!("Cache sort. Sorting every {} iterations.", CACHE_FREQ);
     } else {
@@ -63,7 +63,7 @@ fn train_forest(
     let task = "clf";
     let is_opt = if CACHE_SORT { "opt" } else { "notopt" };
 
-    let path_train_times = format!("res_{task}_{is_opt}_times.csv");
+    let path_train_times = format!("res_{task}_{is_opt}_times_freq{CACHE_FREQ}.csv");
     std::fs::File::create(&path_train_times).unwrap();
     let mut wtr_train_times = WriterBuilder::new()
         .quote_style(csv::QuoteStyle::Never)
@@ -74,7 +74,7 @@ fn train_forest(
                 .unwrap(),
         );
 
-    let path_tree_size = format!("res_{task}_{is_opt}_tree_size.csv");
+    let path_tree_size = format!("res_{task}_{is_opt}_tree_size_freq{CACHE_FREQ}.csv");
     std::fs::File::create(&path_tree_size).unwrap();
     let mut wtr_tree_size = WriterBuilder::new()
         .quote_style(csv::QuoteStyle::Never)
@@ -85,13 +85,13 @@ fn train_forest(
                 .unwrap(),
         );
 
-    let path_depth = format!("res_{task}_{is_opt}_depth.csv");
+    let path_depth = format!("res_{task}_{is_opt}_depth_freq{CACHE_FREQ}.csv");
     std::fs::File::create(&path_depth).unwrap();
     let mut wtr_depth = WriterBuilder::new()
         .quote_style(csv::QuoteStyle::Never)
         .from_writer(OpenOptions::new().append(true).open(&path_depth).unwrap());
 
-    let path_sorted_count = format!("res_{task}_{is_opt}_sorted_count.csv");
+    let path_sorted_count = format!("res_{task}_{is_opt}_sorted_count_freq{CACHE_FREQ}.csv");
     std::fs::File::create(&path_sorted_count).unwrap();
     let mut wtr_sorted_count = WriterBuilder::new()
         .quote_style(csv::QuoteStyle::Never)
@@ -102,7 +102,22 @@ fn train_forest(
                 .unwrap(),
         );
 
+    let path_sort_time = format!("res_{task}_{is_opt}_sort_time_freq{CACHE_FREQ}.csv");
+    std::fs::File::create(&path_sort_time).unwrap();
+    let mut wtr_sort_time = WriterBuilder::new()
+        .quote_style(csv::QuoteStyle::Never)
+        .from_writer(
+            OpenOptions::new()
+                .append(true)
+                .open(&path_sort_time)
+                .unwrap(),
+        );
+
+    // Total train time
     let mut train_time_tot = 0.0;
+    // Cumulative time for 1.000 iters train+score, reset on cache sort
+    let mut score_fit_time_cum = 0;
+
     for (idx, transaction) in transactions.enumerate() {
         let data = transaction.unwrap();
 
@@ -126,12 +141,6 @@ fn train_forest(
         if idx != 0 {
             let score = mf.predict_one(&x, &y);
             score_total += score;
-            // println!(
-            //     "Accuracy: {} / {} = {}",
-            //     score_total,
-            //     dataset_size - 1,
-            //     score_total / idx.to_f32().unwrap()
-            // );
         }
         let score_time = score_instant.elapsed().as_nanos();
 
@@ -144,31 +153,41 @@ fn train_forest(
             .push_str(format!("{},{},{}", score_time, fit_time, score_time + fit_time).as_str());
         train_time_tot += score_instant.elapsed().as_micros().to_f32().unwrap() / 1_000f32;
 
+        score_fit_time_cum += score_time + fit_time;
+
         if (idx % CACHE_FREQ == 0) {
+            let mut cache_time = 0;
             if CACHE_SORT {
-                let cache_time = Instant::now();
+                let cache_instant = Instant::now();
                 mf.cache_sort();
-                // train_time_str.push_str(format!(" CACHING time: {}", cache_time.elapsed().as_nanos()).as_str());
-                // println!("Sorted at inedex: {}", idx);
+                cache_time = cache_instant.elapsed().as_nanos();
             }
 
-            // Mesure tree size
+            // Mesure number of nodes in the tree
             wtr_tree_size
                 .write_record(&[mf.get_forest_size().to_string()])
                 .unwrap();
             wtr_tree_size.flush().unwrap();
 
-            // Mesure depths
+            // Mesure tree depths metrics: avg, max, etc.
             let (node_n, optim, avg, avg_w, max) = mf.get_forest_depth();
             let depth_str = format!("{},{},{},{},{}", node_n, optim, avg, avg_w, max);
             wtr_depth.write_record(&[depth_str]).unwrap();
             wtr_depth.flush().unwrap();
 
-            // Count ordered nodes
+            // Measure: Sorted nodes vs Unsorted nodes
             let (sorted_count, unsorted_count) = mf.get_sorted_count();
             let sorted_count_str = format!("{},{}", sorted_count, unsorted_count);
             wtr_sorted_count.write_record(&[sorted_count_str]).unwrap();
             wtr_sorted_count.flush().unwrap();
+
+            // Measure: Time taken to sort vs Time saved by sorting
+            let node_n = mf.get_forest_size();
+            let sort_time_str = format!("{},{},{},{}", node_n, idx, cache_time, score_fit_time_cum);
+            wtr_sort_time.write_record(&[sort_time_str]).unwrap();
+            wtr_sort_time.flush().unwrap();
+
+            score_fit_time_cum = 0;
         }
         wtr_train_times.write_record(&[train_time_str]).unwrap();
         wtr_train_times.flush().unwrap();

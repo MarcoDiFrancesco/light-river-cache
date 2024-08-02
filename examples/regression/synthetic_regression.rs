@@ -38,7 +38,7 @@ fn train_forest(
     let transactions = SyntheticRegression::load_data();
 
     const CACHE_SORT: bool = false;
-    const CACHE_FREQ: usize = 100_000;
+    const CACHE_FREQ: usize = 1_000;
     if CACHE_SORT {
         println!("Cache sort. Sorting every {} iterations.", CACHE_FREQ);
     } else {
@@ -48,7 +48,7 @@ fn train_forest(
     let task = "reg";
     let is_opt = if CACHE_SORT { "opt" } else { "notopt" };
 
-    let path_train_times = format!("res_{task}_{is_opt}_times.csv");
+    let path_train_times = format!("res_{task}_{is_opt}_times_freq{CACHE_FREQ}.csv");
     std::fs::File::create(&path_train_times).unwrap();
     let mut wtr_train_times = WriterBuilder::new()
         .quote_style(csv::QuoteStyle::Never)
@@ -59,7 +59,7 @@ fn train_forest(
                 .unwrap(),
         );
 
-    let path_tree_size = format!("res_{task}_{is_opt}_tree_size.csv");
+    let path_tree_size = format!("res_{task}_{is_opt}_tree_size_freq{CACHE_FREQ}.csv");
     std::fs::File::create(&path_tree_size).unwrap();
     let mut wtr_tree_size = WriterBuilder::new()
         .quote_style(csv::QuoteStyle::Never)
@@ -70,13 +70,13 @@ fn train_forest(
                 .unwrap(),
         );
 
-    let path_depth = format!("res_{task}_{is_opt}_depth.csv");
+    let path_depth = format!("res_{task}_{is_opt}_depth_freq{CACHE_FREQ}.csv");
     std::fs::File::create(&path_depth).unwrap();
     let mut wtr_depth = WriterBuilder::new()
         .quote_style(csv::QuoteStyle::Never)
         .from_writer(OpenOptions::new().append(true).open(&path_depth).unwrap());
 
-    let path_sorted_count = format!("res_{task}_{is_opt}_sorted_count.csv");
+    let path_sorted_count = format!("res_{task}_{is_opt}_sorted_count_freq{CACHE_FREQ}.csv");
     std::fs::File::create(&path_sorted_count).unwrap();
     let mut wtr_sorted_count = WriterBuilder::new()
         .quote_style(csv::QuoteStyle::Never)
@@ -87,7 +87,7 @@ fn train_forest(
                 .unwrap(),
         );
 
-    let path_sort_time = format!("res_{task}_{is_opt}_sort_time.csv");
+    let path_sort_time = format!("res_{task}_{is_opt}_sort_time_freq{CACHE_FREQ}.csv");
     std::fs::File::create(&path_sort_time).unwrap();
     let mut wtr_sort_time = WriterBuilder::new()
         .quote_style(csv::QuoteStyle::Never)
@@ -121,7 +121,6 @@ fn train_forest(
             let pred = mf.predict_one(&x, &y);
             let err = (pred - y).powi(2);
             err_total += err;
-            // println!("pred: {pred}, y: {y}, err: {err}");
         }
         let score_time = score_instant.elapsed().as_nanos();
 
